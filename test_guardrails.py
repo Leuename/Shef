@@ -21,6 +21,8 @@ from guardrails import (
     check_history_text,
     check_output,
     contains_unsafe_instruction,
+    has_recipe_relevant_input,
+    is_non_ingredient_extraction,
     is_recipe_search_result,
     clean_search_text,
     _normalise_text,
@@ -194,6 +196,47 @@ class TestCheckInput(unittest.TestCase):
         text = ("chicken adobo " * 142)[:MAX_USER_MESSAGE_CHARS]
         result = check_input(text, field_name="Message")
         self.assertEqual(result, text.strip())
+
+
+class TestRecipeRelevantInput(unittest.TestCase):
+    """Tests for deciding whether the current turn can drive a recipe answer."""
+
+    def test_allows_recipe_craving_without_ingredients(self):
+        self.assertTrue(has_recipe_relevant_input("Hi, I'm craving sisig"))
+
+    def test_allows_image_ingredient_extraction(self):
+        self.assertTrue(has_recipe_relevant_input("", "pork belly, onion, calamansi"))
+
+    def test_allows_audio_ingredient_transcript(self):
+        self.assertTrue(has_recipe_relevant_input("", None, "I have eggs, tomato, and onion"))
+
+    def test_rejects_unrelated_text(self):
+        self.assertFalse(has_recipe_relevant_input("Here is my profile photo"))
+
+    def test_rejects_non_ingredient_image_extraction(self):
+        self.assertFalse(
+            has_recipe_relevant_input(
+                "",
+                "No edible kitchen ingredients are visible in this image.",
+                None,
+            )
+        )
+
+    def test_rejects_empty_audio_transcript(self):
+        self.assertFalse(has_recipe_relevant_input("", None, ""))
+
+
+class TestNonIngredientExtraction(unittest.TestCase):
+    """Tests for filtering media extraction text before recipe generation."""
+
+    def test_detects_no_visible_ingredients(self):
+        self.assertTrue(is_non_ingredient_extraction("No ingredients are visible."))
+
+    def test_detects_no_edible_items(self):
+        self.assertTrue(is_non_ingredient_extraction("I do not see any edible kitchen items."))
+
+    def test_does_not_reject_real_ingredients(self):
+        self.assertFalse(is_non_ingredient_extraction("pork belly, onion, calamansi"))
 
 
 class TestBase64Injection(unittest.TestCase):

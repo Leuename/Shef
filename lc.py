@@ -14,7 +14,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-import riva.client
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
@@ -22,7 +21,16 @@ from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from starlette.concurrency import run_in_threadpool
-from tavily import TavilyClient
+
+try:
+    import riva.client
+except ModuleNotFoundError:
+    riva = None
+
+try:
+    from tavily import TavilyClient
+except ModuleNotFoundError:
+    TavilyClient = None
 
 from guardrails import (
     MAX_AI_REPLY_CHARS,
@@ -36,6 +44,7 @@ from guardrails import (
     check_output,
     clean_search_text,
     contains_unsafe_instruction,
+    has_recipe_relevant_input,
     is_recipe_search_result,
 )
 from rate_limit import enforce_rate_limit
@@ -221,6 +230,15 @@ def require_env(name: str, *, fallback: str | None = None) -> str:
     )
 
 
+def require_riva_client() -> Any:
+    if riva is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Missing nvidia-riva-client. Install requirements to use audio transcription.",
+        )
+    return riva.client
+
+
 # ── Model / service singletons ──────────────────────────────────────────────
 
 
@@ -250,11 +268,17 @@ def get_vision_model() -> ChatNVIDIA:
 
 @lru_cache(maxsize=1)
 def get_tavily_client() -> TavilyClient:
+    if TavilyClient is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Missing tavily-python. Install requirements to use recipe search.",
+        )
     return TavilyClient(api_key=require_env("TAVILY_API_KEY"))
 
 
 @lru_cache(maxsize=1)
 def get_riva_asr_service() -> riva.client.ASRService:
+    riva_client = require_riva_client()
     api_key = require_env("PARAKEET_API_KEY", fallback="NVIDIA_API_KEY")
     metadata = [
         ["function-id", os.getenv("PARAKEET_FUNCTION_ID", PARAKEET_FUNCTION_ID)],
@@ -264,13 +288,13 @@ def get_riva_asr_service() -> riva.client.ASRService:
         ("grpc.max_receive_message_length", 100 * 1024 * 1024),
         ("grpc.max_send_message_length", 100 * 1024 * 1024),
     ]
-    auth = riva.client.Auth(
+    auth = riva_client.Auth(
         use_ssl=True,
         uri=os.getenv("RIVA_SERVER", RIVA_SERVER),
         metadata_args=metadata,
         options=options,
     )
-    return riva.client.ASRService(auth)
+    return riva_client.ASRService(auth)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -392,9 +416,10 @@ def decode_wav_for_riva(data: bytes) -> tuple[bytes, int]:
 
 
 def transcribe_audio_sync(data: bytes) -> str:
+    riva_client = require_riva_client()
     raw_audio, sample_rate = decode_wav_for_riva(data)
-    config = riva.client.RecognitionConfig(
-        encoding=riva.client.AudioEncoding.LINEAR_PCM,
+    config = riva_client.RecognitionConfig(
+        encoding=riva_client.AudioEncoding.LINEAR_PCM,
         sample_rate_hertz=sample_rate,
         language_code="en-US",
         max_alternatives=1,
@@ -579,6 +604,12 @@ async def chat(
             audio_transcript,
             field_name="Audio transcript",
             max_chars=MAX_EXTRACTED_CONTEXT_CHARS,
+        )
+
+    if not has_recipe_relevant_input(clean_message, image_ingredients, audio_transcript):
+        raise HTTPException(
+            status_code=400,
+            detail="Send ingredients or a cooking question by text, image, or voice so Shef can help with a recipe.",
         )
 
     search_seed = "\n".join(

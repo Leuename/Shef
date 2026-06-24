@@ -20,6 +20,10 @@ _Avoid_: Server chat, cloud chat
 The process of turning an uploaded ingredient image or voice note into text context for Shef.
 _Avoid_: Upload parsing, file processing
 
+**Recipe-Relevant Input**:
+Current-turn text, image extraction, or audio transcript that contains ingredients, a dish, or a cooking intent Shef can act on.
+_Avoid_: Any upload, any message
+
 **Recipe Search**:
 The web lookup Shef uses to ground recipe suggestions before answering.
 _Avoid_: Browsing, scraping

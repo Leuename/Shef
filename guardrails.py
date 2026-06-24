@@ -71,6 +71,110 @@ RECIPE_CONTEXT_TERMS: tuple[str, ...] = (
     "ulam",
 )
 
+FOOD_RELEVANCE_TERMS: tuple[str, ...] = (
+    *RECIPE_CONTEXT_TERMS,
+    "craving",
+    "hungry",
+    "eat",
+    "breakfast",
+    "lunch",
+    "dinner",
+    "snack",
+    "dessert",
+    "sisig",
+    "adobo",
+    "sinigang",
+    "pancit",
+    "tinola",
+    "kare-kare",
+    "afritada",
+    "menudo",
+    "lechon",
+    "lumpia",
+    "torta",
+    "paksiw",
+    "caldereta",
+    "nilaga",
+    "giniling",
+    "laing",
+    "bicol express",
+    "halo-halo",
+    "chicken",
+    "pork",
+    "beef",
+    "fish",
+    "shrimp",
+    "egg",
+    "eggs",
+    "rice",
+    "garlic",
+    "onion",
+    "tomato",
+    "calamansi",
+    "soy sauce",
+    "vinegar",
+    "pepper",
+    "salt",
+    "ginger",
+    "coconut milk",
+    "vegetable",
+    "vegetables",
+    "eggplant",
+    "noodle",
+    "noodles",
+    "tofu",
+    "mushroom",
+    "cheese",
+    "flour",
+    "sugar",
+    "milk",
+    "apple",
+    "banana",
+    "carrot",
+    "potato",
+    "cabbage",
+    "lettuce",
+    "cucumber",
+    "squash",
+    "beans",
+    "corn",
+    "mango",
+    "pineapple",
+    "papaya",
+    "bread",
+    "butter",
+    "oil",
+)
+
+NON_INGREDIENT_EXTRACTION_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"\bno\s+(?:edible\s+|kitchen\s+|visible\s+)*"
+        r"(?:ingredients?|food|items?)\s+(?:are\s+|were\s+)?"
+        r"(?:visible|detected|found|present)\b"
+    ),
+    re.compile(
+        r"\b(?:i\s+)?(?:do\s+not|don't|cannot|can't)\s+see\s+"
+        r"(?:any\s+)?(?:edible\s+|kitchen\s+|visible\s+)*"
+        r"(?:ingredients?|food|items?)\b"
+    ),
+    re.compile(
+        r"\b(?:image|photo|picture)\s+(?:does\s+not|doesn't)\s+"
+        r"(?:show|contain|include)\s+(?:any\s+)?"
+        r"(?:ingredients?|food|edible\s+items?)\b"
+    ),
+)
+
+NON_FOOD_MEDIA_TERMS: tuple[str, ...] = (
+    "person",
+    "people",
+    "face",
+    "selfie",
+    "profile photo",
+    "profile picture",
+    "portrait",
+    "clothing",
+)
+
 # ── Output-secret patterns & markers ────────────────────────────────────────
 
 SECRET_OUTPUT_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -360,6 +464,52 @@ def check_history_text(text: str) -> str | None:
     if not clean_text or contains_unsafe_instruction(clean_text):
         return None
     return clean_text
+
+
+def is_non_ingredient_extraction(text: str) -> bool:
+    """Return True when an attachment extractor says it found no food items."""
+    normalised = _normalise_text(text)
+    return any(pattern.search(normalised) for pattern in NON_INGREDIENT_EXTRACTION_PATTERNS)
+
+
+def _contains_food_relevance(text: str) -> bool:
+    haystack = _normalise_text(text)
+    return any(term in haystack for term in FOOD_RELEVANCE_TERMS)
+
+
+def _looks_like_extracted_ingredient_list(text: str) -> bool:
+    haystack = _normalise_text(text)
+    if any(term in haystack for term in NON_FOOD_MEDIA_TERMS):
+        return False
+    return "," in haystack and len(haystack.split()) <= 40
+
+
+def has_recipe_relevant_input(
+    message: str,
+    image_ingredients: str | None = None,
+    audio_transcript: str | None = None,
+) -> bool:
+    """Return True when the current turn has cooking intent or ingredients.
+
+    History is intentionally excluded so an unrelated upload cannot inherit a
+    previous recipe topic and generate another recipe.
+    """
+    clean_message = message.strip()
+    clean_image_ingredients = (image_ingredients or "").strip()
+    clean_audio_transcript = (audio_transcript or "").strip()
+
+    if clean_message and _contains_food_relevance(clean_message):
+        return True
+
+    if clean_image_ingredients and not is_non_ingredient_extraction(clean_image_ingredients):
+        has_food_terms = _contains_food_relevance(clean_image_ingredients)
+        looks_like_ingredient_list = _looks_like_extracted_ingredient_list(clean_image_ingredients)
+        return has_food_terms or looks_like_ingredient_list
+
+    if clean_audio_transcript and _contains_food_relevance(clean_audio_transcript):
+        return True
+
+    return False
 
 
 # ── Output guardrails ───────────────────────────────────────────────────────
