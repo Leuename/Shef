@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: Shef
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn lc:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: PARAKEET_API_KEY
+        sync: false
+      - key: META_API_KEY
+        sync: false
+      - key: OPEN_MODEL_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: LANGSMITH_API_KEY
+        sync: false
