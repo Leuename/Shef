@@ -928,7 +928,11 @@ def sse_event(event: str, payload: dict[str, Any]) -> str:
 
 @app.get("/api/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "guardrails": "active"}
+    return {
+        "status": "ok",
+        "guardrails": "active",
+        "recipe_provider": recipe_provider_label(),
+    }
 
 
 # ── Chat endpoint ──────────────────────────────────────────────────────────
@@ -1014,7 +1018,13 @@ async def chat(
             raw_parts: list[str] = []
 
             try:
-                yield sse_event("meta", {"response_mode": effective_response_mode})
+                yield sse_event(
+                    "meta",
+                    {
+                        "response_mode": effective_response_mode,
+                        "recipe_provider": recipe_provider_label(),
+                    },
+                )
                 for delta in stream_recipe_agent_sync(
                     history_messages=history_messages,
                     current_prompt=current_prompt,
