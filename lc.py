@@ -304,6 +304,18 @@ DIRECT_RECIPE_HELP_PATTERN = re.compile(
 )
 
 
+def looks_like_bare_ingredient_list(text: str) -> bool:
+    if not text or "?" in text:
+        return False
+    items = [part.strip() for part in re.split(r"[,;\n]+", text) if part.strip()]
+    if len(items) < 3:
+        return False
+    word_count = len(re.findall(r"\b[\w-]+\b", text))
+    if word_count > 60:
+        return False
+    return has_recipe_relevant_input(text)
+
+
 def env_value(name: str, *, fallback: str | None = None) -> str | None:
     return os.getenv(name) or (os.getenv(fallback) if fallback else None)
 
@@ -367,6 +379,9 @@ def should_offer_recipe_options(
         return False
 
     if BROAD_RECIPE_OPTIONS_PATTERN.search(text):
+        return True
+
+    if looks_like_bare_ingredient_list(message):
         return True
 
     if (image_ingredients or audio_transcript) and not DIRECT_RECIPE_HELP_PATTERN.search(message):

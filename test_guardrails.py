@@ -269,6 +269,45 @@ class TestNonIngredientExtraction(unittest.TestCase):
         self.assertFalse(is_non_ingredient_extraction("pork belly, onion, calamansi"))
 
 
+class TestResponseModeResolution(unittest.TestCase):
+    """Tests for deciding when Shef should show recipe choice buttons first."""
+
+    def test_bare_ingredient_list_uses_recipe_options(self):
+        import lc
+
+        message = (
+            "pork, soy sauce, garlic, basil leaves, brown sugar, "
+            "pineapple juice, pepper corns"
+        )
+
+        self.assertTrue(lc.looks_like_bare_ingredient_list(message))
+        self.assertEqual(
+            lc.resolve_response_mode(
+                lc.RESPONSE_MODE_AUTO,
+                message=message,
+                image_ingredients=None,
+                audio_transcript=None,
+            ),
+            lc.RESPONSE_MODE_RECIPE_OPTIONS,
+        )
+
+    def test_direct_cooking_question_with_ingredients_uses_full_recipe(self):
+        import lc
+
+        message = "how long do I cook pork, soy sauce, garlic, and pineapple juice?"
+
+        self.assertFalse(lc.looks_like_bare_ingredient_list(message))
+        self.assertEqual(
+            lc.resolve_response_mode(
+                lc.RESPONSE_MODE_AUTO,
+                message=message,
+                image_ingredients=None,
+                audio_transcript=None,
+            ),
+            lc.RESPONSE_MODE_FULL_RECIPE,
+        )
+
+
 class TestBase64Injection(unittest.TestCase):
     """Tests for base64 injection detection."""
 
