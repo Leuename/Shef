@@ -10,6 +10,16 @@ __pycache__/
 # Pytest cache
 .pytest_cache/
 
+# Local runtime data
+.local/
+supabase/.temp/
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+
 # Local history (VS Code)
 .history/
 

@@ -48,6 +48,9 @@ const sidebarBackdrop = document.querySelector("#sidebarBackdrop");
 const chatList = document.querySelector("#chatList");
 const sendButton = document.querySelector("#sendButton");
 const toastContainer = document.querySelector("#toastContainer");
+const privacyButton = document.querySelector("#privacyButton");
+const privacyModal = document.querySelector("#privacyModal");
+const privacyCloseButton = document.querySelector("#privacyCloseButton");
 
 let state = loadState();
 let imageAttachment = null;
@@ -57,7 +60,7 @@ let recordingStartedAt = 0;
 let recordingInterval = null;
 let typingNode = null;
 let isSending = false;
-let expandedRecipeOptionKey = "";
+let recipeOptionPreview = null;
 
 const createId = () =>
   window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
@@ -594,6 +597,20 @@ const closeSidebar = () => {
   }, 180);
 };
 
+const openPrivacyModal = () => {
+  if (!privacyModal) return;
+  privacyModal.hidden = false;
+  document.body.classList.add("modal-open");
+  privacyCloseButton?.focus();
+};
+
+const closePrivacyModal = () => {
+  if (!privacyModal) return;
+  privacyModal.hidden = true;
+  document.body.classList.remove("modal-open");
+  privacyButton?.focus();
+};
+
 const createAvatar = (kind) => {
   const avatar = document.createElement("div");
   avatar.className = kind === "user" ? "avatar user-avatar" : "avatar bot-avatar";
@@ -777,6 +794,69 @@ const createRecipeOptionDescription = (option) => {
   return description;
 };
 
+const closeRecipeOptionPreview = () => {
+  recipeOptionPreview = null;
+  const modal = document.querySelector(".recipe-option-modal");
+  modal?.remove();
+  document.body.classList.remove("modal-open");
+};
+
+const renderRecipeOptionPreview = () => {
+  document.querySelector(".recipe-option-modal")?.remove();
+  if (!recipeOptionPreview) return;
+
+  const { messageId, option } = recipeOptionPreview;
+  const overlay = document.createElement("div");
+  overlay.className = "recipe-option-modal";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-labelledby", "recipeOptionPreviewTitle");
+
+  const dialog = document.createElement("div");
+  dialog.className = "recipe-option-dialog";
+
+  const closeButton = document.createElement("button");
+  closeButton.className = "recipe-option-close";
+  closeButton.type = "button";
+  closeButton.innerHTML = "&times;";
+  closeButton.setAttribute("aria-label", "Close recipe description");
+
+  const title = document.createElement("h2");
+  title.id = "recipeOptionPreviewTitle";
+  title.textContent = option.title;
+
+  const description = createRecipeOptionDescription(option);
+
+  const confirmButton = document.createElement("button");
+  confirmButton.className = "recipe-option-confirm";
+  confirmButton.type = "button";
+  confirmButton.textContent = "Choose this Recipe";
+  confirmButton.disabled = isSending;
+  confirmButton.addEventListener("click", () => {
+    if (isSending) return;
+    closeRecipeOptionPreview();
+    selectRecipeOption(messageId, option.title);
+  });
+
+  closeButton.addEventListener("click", closeRecipeOptionPreview);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) {
+      closeRecipeOptionPreview();
+    }
+  });
+
+  dialog.append(closeButton, title, description, confirmButton);
+  overlay.append(dialog);
+  document.body.append(overlay);
+  document.body.classList.add("modal-open");
+  closeButton.focus();
+};
+
+const openRecipeOptionPreview = (messageId, option) => {
+  recipeOptionPreview = { messageId, option };
+  renderRecipeOptionPreview();
+};
+
 const createRecipeOptionsNode = ({ messageId, options, selectedRecipeTitle = "" }) => {
   const container = document.createElement("div");
   container.className = "recipe-options";
@@ -790,16 +870,13 @@ const createRecipeOptionsNode = ({ messageId, options, selectedRecipeTitle = "" 
   list.className = "recipe-options-list";
 
   options.forEach((option) => {
-    const optionKey = `${messageId}:${option.title}`;
     const isSelected = selectedRecipeTitle === option.title;
     const hasSelection = Boolean(selectedRecipeTitle);
-    const isExpanded = expandedRecipeOptionKey === optionKey;
 
     const item = document.createElement("div");
     item.className = "recipe-option-card";
     item.classList.toggle("is-selected", isSelected);
     item.classList.toggle("is-disabled", hasSelection || isSending);
-    item.classList.toggle("is-expanded", isExpanded);
 
     const titleButton = document.createElement("button");
     titleButton.className = "recipe-option-title";
@@ -811,8 +888,7 @@ const createRecipeOptionsNode = ({ messageId, options, selectedRecipeTitle = "" 
     titleButton.addEventListener("click", () => {
       if (hasSelection || isSending) return;
       if (isTouchInteraction()) {
-        expandedRecipeOptionKey = isExpanded ? "" : optionKey;
-        renderMessages();
+        openRecipeOptionPreview(messageId, option);
         return;
       }
       selectRecipeOption(messageId, option.title);
@@ -820,24 +896,13 @@ const createRecipeOptionsNode = ({ messageId, options, selectedRecipeTitle = "" 
 
     const description = createRecipeOptionDescription(option);
 
-    const confirmButton = document.createElement("button");
-    confirmButton.className = "recipe-option-confirm";
-    confirmButton.type = "button";
-    confirmButton.textContent = `Use ${option.title}`;
-    confirmButton.hidden = !isExpanded || hasSelection;
-    confirmButton.disabled = hasSelection || isSending;
-    confirmButton.addEventListener("click", () => {
-      if (hasSelection || isSending) return;
-      selectRecipeOption(messageId, option.title);
-    });
-
     if (isSelected) {
       const badge = document.createElement("span");
       badge.className = "recipe-option-selected";
       badge.textContent = "Selected";
       item.append(titleButton, badge, description);
     } else {
-      item.append(titleButton, description, confirmButton);
+      item.append(titleButton, description);
     }
 
     list.append(item);
@@ -1129,6 +1194,7 @@ const callChatApi = async ({
   threadId,
   history,
   responseMode = RESPONSE_MODE_AUTO,
+  usageEvent = "",
   onMeta,
   onChunk,
 }) => {
@@ -1137,6 +1203,7 @@ const callChatApi = async ({
   formData.append("thread_id", threadId);
   formData.append("history", JSON.stringify(history));
   formData.append("response_mode", responseMode);
+  formData.append("usage_event", usageEvent);
 
   if (imageFile) {
     formData.append("image", imageFile, imageFile.name);
@@ -1294,7 +1361,6 @@ const sendMessage = async ({
 
   if (optionMessage && selectedRecipeTitle) {
     optionMessage.selectedRecipeTitle = selectedRecipeTitle;
-    expandedRecipeOptionKey = "";
   }
 
   chat.messages.push({
@@ -1348,6 +1414,7 @@ const sendMessage = async ({
       threadId: chatId,
       history: apiHistory,
       responseMode,
+      usageEvent: sourceOptionMessageId ? "recipe_selected" : "",
       onMeta: (mode) => {
         effectiveResponseMode = mode;
       },
@@ -1632,6 +1699,13 @@ stopRecordingButton.addEventListener("click", stopRecording);
 menuButton.addEventListener("click", openSidebar);
 sidebarCloseButton.addEventListener("click", closeSidebar);
 sidebarBackdrop.addEventListener("click", closeSidebar);
+privacyButton?.addEventListener("click", openPrivacyModal);
+privacyCloseButton?.addEventListener("click", closePrivacyModal);
+privacyModal?.addEventListener("click", (event) => {
+  if (event.target === privacyModal) {
+    closePrivacyModal();
+  }
+});
 
 chatList.addEventListener("click", (event) => {
   const row = event.target.closest(".chat-row");
@@ -1645,7 +1719,18 @@ chatList.addEventListener("click", (event) => {
 });
 
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && sidebar.classList.contains("is-open")) {
+  if (event.key !== "Escape") {
+    return;
+  }
+  if (recipeOptionPreview) {
+    closeRecipeOptionPreview();
+    return;
+  }
+  if (privacyModal && !privacyModal.hidden) {
+    closePrivacyModal();
+    return;
+  }
+  if (sidebar.classList.contains("is-open")) {
     closeSidebar();
     menuButton.focus();
   }

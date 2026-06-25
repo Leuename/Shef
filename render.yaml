@@ -26,3 +26,7 @@ services:
         sync: false
       - key: LANGSMITH_API_KEY
         sync: false
+      - key: ADMIN_DASHBOARD_TOKEN
+        sync: false
+      - key: SHEF_USAGE_DATABASE_URL
+        sync: false

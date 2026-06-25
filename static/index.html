@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="icon" href="./assets/icon-transparent.png" />
-    <link rel="stylesheet" href="./styles.css?v=a84df6e" />
+    <link rel="stylesheet" href="./styles.css?v=choose-this-recipe-modal" />
   </head>
   <body>
     <div class="app-shell">
@@ -67,6 +67,9 @@
               <p>Your personal chef assistant from the Philippines</p>
             </div>
           </div>
+          <div class="header-actions">
+            <button class="privacy-button" id="privacyButton" type="button">Privacy</button>
+          </div>
         </header>
 
         <section class="message-list" id="messageList" aria-live="polite" aria-label="Conversation"></section>
@@ -120,6 +123,19 @@
 
     <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
-    <script src="./app.js?v=a84df6e"></script>
+    <div class="privacy-modal" id="privacyModal" role="dialog" aria-modal="true" aria-labelledby="privacyTitle" hidden>
+      <div class="privacy-dialog">
+        <button class="privacy-close" id="privacyCloseButton" type="button" aria-label="Close privacy notice">&times;</button>
+        <h2 id="privacyTitle">Privacy</h2>
+        <p>
+          Shef logs anonymous usage events only to understand whether this project is being used.
+          Events may include sending a chat, selecting a recipe, uploading an image, recording audio,
+          or seeing an error.
+        </p>
+        <p>Shef does not store chat messages, uploaded images, audio recordings, generated recipes, personal identifiers, or exact IP addresses.</p>
+      </div>
+    </div>
+
+    <script src="./app.js?v=choose-this-recipe-modal"></script>
   </body>
 </html>

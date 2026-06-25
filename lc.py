@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import html
 import io
 import json
 import logging
 import os
 import re
+import secrets
 import time
 import wave
 from collections import OrderedDict
@@ -19,7 +21,7 @@ from typing import Any
 import anthropic
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -52,6 +54,13 @@ from guardrails import (
     is_recipe_search_result,
 )
 from rate_limit import enforce_rate_limit
+from usage_logging import (
+    USAGE_SESSION_COOKIE,
+    log_usage_event,
+    normalise_session_id,
+    rough_user_agent_family,
+    usage_summary,
+)
 
 logger = logging.getLogger("shef")
 
@@ -192,6 +201,249 @@ def load_environment() -> None:
 load_environment()
 
 app = FastAPI(title="Shef")
+
+
+def usage_session_for_request(request: Request) -> str:
+    return normalise_session_id(request.cookies.get(USAGE_SESSION_COOKIE))
+
+
+def request_user_agent_family(request: Request) -> str:
+    return rough_user_agent_family(request.headers.get("user-agent"))
+
+
+def safe_response_mode_for_log(response_mode: str | None) -> str | None:
+    return response_mode if response_mode in RESPONSE_MODES else None
+
+
+def attachment_type_for_log(*, has_image: bool, has_audio: bool) -> str | None:
+    if has_image and has_audio:
+        return "mixed"
+    if has_image:
+        return "image"
+    if has_audio:
+        return "audio"
+    return None
+
+
+def log_request_usage(
+    request: Request,
+    *,
+    session_id: str,
+    event_type: str,
+    response_mode: str | None = None,
+    model_provider: str | None = None,
+    success: bool | None = None,
+    attachment_type: str | None = None,
+    status_code: int | None = None,
+    error_category: str | None = None,
+) -> None:
+    log_usage_event(
+        event_type=event_type,
+        session_id=session_id,
+        response_mode=response_mode,
+        model_provider=model_provider,
+        success=success,
+        attachment_type=attachment_type,
+        status_code=status_code,
+        error_category=error_category,
+        user_agent_family=request_user_agent_family(request),
+    )
+
+
+def error_category_for_http_exception(exc: HTTPException) -> str:
+    detail = str(exc.detail).lower()
+    if exc.status_code == 429:
+        return "rate_limited"
+    if exc.status_code == 413:
+        return "upload_too_large"
+    if exc.status_code == 400 and "unsafe" in detail:
+        return "unsafe_input"
+    if exc.status_code == 400:
+        return "bad_request"
+    if exc.status_code >= 500:
+        return "upstream_error"
+    return "http_error"
+
+
+def dashboard_token() -> str:
+    return os.getenv("ADMIN_DASHBOARD_TOKEN", "").strip()
+
+
+def _admin_form(message: str, *, status_code: int) -> HTMLResponse:
+    escaped_message = html.escape(message)
+    return HTMLResponse(
+        f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shef Admin</title>
+    <style>
+      body {{ margin: 0; font-family: Arial, sans-serif; color: #1f2721; background: #f6f7f3; }}
+      main {{ width: min(420px, calc(100vw - 32px)); margin: 12vh auto; }}
+      form {{ display: grid; gap: 12px; padding: 22px; border: 1px solid #dfe8d9; background: #fff; }}
+      h1 {{ margin: 0 0 6px; font-size: 24px; }}
+      p {{ margin: 0; color: #626672; line-height: 1.45; }}
+      input, button {{ min-height: 42px; font: inherit; }}
+      input {{ padding: 0 12px; border: 1px solid #cfd9c9; }}
+      button {{ border: 0; color: #fff; background: #2f6b3f; cursor: pointer; }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <form method="post" action="/admin/usage">
+        <h1>Shef Admin</h1>
+        <p>{escaped_message}</p>
+        <input name="token" type="password" autocomplete="current-password" aria-label="Admin token" autofocus />
+        <button type="submit">Open dashboard</button>
+      </form>
+    </main>
+  </body>
+</html>""",
+        status_code=status_code,
+    )
+
+
+def _html_value(value: object) -> str:
+    if value is None:
+        return ""
+    if value in (0, 1):
+        return "yes" if value == 1 else "no"
+    return html.escape(str(value))
+
+
+def _admin_dashboard() -> HTMLResponse:
+    summary = usage_summary(limit=30)
+    cards = [
+        ("Total sessions", summary["total_sessions"]),
+        ("Total chats", summary["total_chats"]),
+        ("Recipe selections", summary["recipe_selections"]),
+        ("Uploads", summary["uploads"]),
+        ("Errors", summary["errors"]),
+    ]
+    card_html = "".join(
+        f"<section><span>{html.escape(label)}</span><strong>{value}</strong></section>"
+        for label, value in cards
+    )
+    rows = "".join(
+        """
+        <tr>
+          <td>{created_at}</td>
+          <td>{event_type}</td>
+          <td>{session_id}</td>
+          <td>{response_mode}</td>
+          <td>{attachment_type}</td>
+          <td>{status_code}</td>
+          <td>{error_category}</td>
+          <td>{user_agent_family}</td>
+        </tr>
+        """.format(
+            created_at=_html_value(item.get("created_at")),
+            event_type=_html_value(item.get("event_type")),
+            session_id=_html_value(item.get("session_id")),
+            response_mode=_html_value(item.get("response_mode")),
+            attachment_type=_html_value(item.get("attachment_type")),
+            status_code=_html_value(item.get("status_code")),
+            error_category=_html_value(item.get("error_category")),
+            user_agent_family=_html_value(item.get("user_agent_family")),
+        )
+        for item in summary["recent_activity"]
+    ) or "<tr><td colspan=\"8\">No activity yet.</td></tr>"
+
+    return HTMLResponse(
+        f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shef Usage Dashboard</title>
+    <style>
+      body {{ margin: 0; font-family: Arial, sans-serif; color: #1f2721; background: #f6f7f3; }}
+      main {{ width: min(1120px, calc(100vw - 32px)); margin: 32px auto; }}
+      h1 {{ margin: 0 0 4px; font-size: 28px; }}
+      p {{ margin: 0 0 22px; color: #626672; }}
+      .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }}
+      section {{ padding: 16px; border: 1px solid #dfe8d9; background: #fff; }}
+      section span {{ display: block; color: #626672; font-size: 13px; }}
+      section strong {{ display: block; margin-top: 8px; font-size: 30px; }}
+      .table-wrap {{ overflow-x: auto; border: 1px solid #dfe8d9; background: #fff; }}
+      table {{ width: 100%; border-collapse: collapse; min-width: 840px; }}
+      th, td {{ padding: 10px 12px; border-bottom: 1px solid #edf1ea; text-align: left; font-size: 13px; }}
+      th {{ color: #475149; background: #f0f4ed; }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Shef Usage Dashboard</h1>
+      <p>Anonymous usage events only. Chat messages, uploads, generated recipes, exact IP addresses, and personal identifiers are not stored.</p>
+      <div class="cards">{card_html}</div>
+      <h2>Recent activity</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Event</th>
+              <th>Session</th>
+              <th>Mode</th>
+              <th>Attachment</th>
+              <th>Status</th>
+              <th>Error</th>
+              <th>Browser</th>
+            </tr>
+          </thead>
+          <tbody>{rows}</tbody>
+        </table>
+      </div>
+    </main>
+  </body>
+</html>"""
+    )
+
+
+def authenticated_dashboard_response(request: Request, supplied_token: str = "") -> HTMLResponse:
+    expected_token = dashboard_token()
+    if not expected_token:
+        raise HTTPException(status_code=404, detail="Admin dashboard is not enabled.")
+
+    candidate = supplied_token or request.headers.get("x-admin-token", "")
+    if not candidate:
+        return _admin_form("Enter the private admin token to view usage.", status_code=401)
+    if not secrets.compare_digest(candidate, expected_token):
+        return _admin_form("That admin token was not accepted.", status_code=403)
+    return _admin_dashboard()
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+async def index(request: Request) -> FileResponse:
+    index_path = STATIC_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="Static app is not available.")
+
+    raw_session_id = request.cookies.get(USAGE_SESSION_COOKIE)
+    session_id = normalise_session_id(raw_session_id)
+    response = FileResponse(index_path)
+    if raw_session_id != session_id:
+        response.set_cookie(
+            USAGE_SESSION_COOKIE,
+            session_id,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+        )
+        log_request_usage(request, session_id=session_id, event_type="session_started")
+    return response
+
+
+@app.get("/admin/usage", include_in_schema=False)
+async def admin_usage_get(request: Request) -> HTMLResponse:
+    return authenticated_dashboard_response(request)
+
+
+@app.post("/admin/usage", include_in_schema=False)
+async def admin_usage_post(request: Request, token: str = Form(default="")) -> HTMLResponse:
+    return authenticated_dashboard_response(request, token.strip())
 
 
 SHEF_SYSTEM_PROMPT = """
@@ -343,7 +595,7 @@ def env_flag(name: str, *, default: bool) -> bool:
 
 
 def use_nvidia_nim_api() -> bool:
-    return env_flag("USE_NVIDIA_NIM_API", default=True)
+    return env_flag("USE_NVIDIA_NIM_API", default=False)
 
 
 def recipe_provider_label() -> str:
@@ -960,148 +1212,294 @@ async def chat(
     thread_id: str = Form(default=""),
     history: str | None = Form(default=None),
     response_mode: str = Form(default=RESPONSE_MODE_AUTO),
+    usage_event: str = Form(default=""),
     image: UploadFile | None = File(default=None),
     audio: UploadFile | None = File(default=None),
 ) -> dict[str, str] | StreamingResponse:
-    enforce_rate_limit(request)
+    session_id = usage_session_for_request(request)
+    requested_response_mode = safe_response_mode_for_log(response_mode)
+    effective_response_mode = requested_response_mode
+    attachment_type = attachment_type_for_log(has_image=image is not None, has_audio=audio is not None)
+    pending_error_category: str | None = None
 
-    clean_message = check_input(message, field_name="Message")
-    clean_thread_id = thread_id.strip() or "local-chat"
-    history_messages = parse_history(history)
+    try:
+        enforce_rate_limit(request)
 
-    image_data = await read_upload(image, label="Image", max_bytes=MAX_IMAGE_BYTES)
-    audio_data = await read_upload(audio, label="Audio", max_bytes=MAX_AUDIO_BYTES)
+        log_request_usage(
+            request,
+            session_id=session_id,
+            event_type="chat_submitted",
+            response_mode=requested_response_mode,
+            model_provider=recipe_provider_label(),
+            attachment_type=attachment_type,
+        )
+        if image is not None:
+            log_request_usage(
+                request,
+                session_id=session_id,
+                event_type="image_uploaded",
+                response_mode=requested_response_mode,
+                model_provider=recipe_provider_label(),
+                attachment_type="image",
+            )
+        if audio is not None:
+            log_request_usage(
+                request,
+                session_id=session_id,
+                event_type="audio_uploaded",
+                response_mode=requested_response_mode,
+                model_provider=recipe_provider_label(),
+                attachment_type="audio",
+            )
+        if usage_event.strip() == "recipe_selected":
+            log_request_usage(
+                request,
+                session_id=session_id,
+                event_type="recipe_selected",
+                response_mode=requested_response_mode,
+                model_provider=recipe_provider_label(),
+            )
 
-    if not clean_message and not image_data and not audio_data:
-        raise HTTPException(
-            status_code=400,
-            detail="Type a message, attach an image, or record audio first.",
+        clean_message = check_input(message, field_name="Message")
+        clean_thread_id = thread_id.strip() or "local-chat"
+        history_messages = parse_history(history)
+
+        image_data = await read_upload(image, label="Image", max_bytes=MAX_IMAGE_BYTES)
+        audio_data = await read_upload(audio, label="Audio", max_bytes=MAX_AUDIO_BYTES)
+
+        if not clean_message and not image_data and not audio_data:
+            raise HTTPException(
+                status_code=400,
+                detail="Type a message, attach an image, or record audio first.",
+            )
+
+        image_ingredients = None
+        if image_data and image:
+            image_ingredients = await run_in_threadpool(extract_image_ingredients_sync, image_data, image)
+            image_ingredients = check_input(
+                image_ingredients,
+                field_name="Image ingredient extraction",
+                max_chars=MAX_EXTRACTED_CONTEXT_CHARS,
+            )
+
+        audio_transcript = None
+        if audio_data:
+            audio_transcript = await run_in_threadpool(transcribe_audio_sync, audio_data)
+            audio_transcript = check_input(
+                audio_transcript,
+                field_name="Audio transcript",
+                max_chars=MAX_EXTRACTED_CONTEXT_CHARS,
+            )
+
+        if not has_recipe_relevant_input(clean_message, image_ingredients, audio_transcript):
+            if attachment_type:
+                pending_error_category = "non_ingredient_upload"
+                log_request_usage(
+                    request,
+                    session_id=session_id,
+                    event_type="non_ingredient_upload_rejected",
+                    response_mode=requested_response_mode,
+                    model_provider=recipe_provider_label(),
+                    attachment_type=attachment_type,
+                    success=False,
+                    status_code=400,
+                    error_category=pending_error_category,
+                )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Upload or describe visible food, cooking ingredients, or a prepared dish "
+                    "so Shef can suggest a recipe."
+                ),
+            )
+
+        effective_response_mode = resolve_response_mode(
+            response_mode,
+            message=clean_message,
+            image_ingredients=image_ingredients,
+            audio_transcript=audio_transcript,
+        )
+        system_prompt = system_prompt_for_response_mode(effective_response_mode)
+
+        search_seed = "\n".join(
+            part
+            for part in [clean_message, image_ingredients or "", audio_transcript or ""]
+            if part.strip()
+        )
+        search_context = await run_in_threadpool(recipe_search_sync, search_seed, clean_thread_id)
+        current_prompt = build_current_prompt(
+            message=clean_message,
+            image_ingredients=image_ingredients,
+            audio_transcript=audio_transcript,
+            search_context=search_context,
         )
 
-    image_ingredients = None
-    if image_data and image:
-        image_ingredients = await run_in_threadpool(extract_image_ingredients_sync, image_data, image)
-        image_ingredients = check_input(
-            image_ingredients,
-            field_name="Image ingredient extraction",
-            max_chars=MAX_EXTRACTED_CONTEXT_CHARS,
+        if "text/event-stream" in request.headers.get("accept", ""):
+            def generate_events() -> Iterator[str]:
+                started_at = time.monotonic()
+                first_token_at: float | None = None
+                raw_parts: list[str] = []
+
+                try:
+                    yield sse_event(
+                        "meta",
+                        {
+                            "response_mode": effective_response_mode,
+                            "recipe_provider": recipe_provider_label(),
+                        },
+                    )
+                    for delta in stream_recipe_agent_sync(
+                        history_messages=history_messages,
+                        current_prompt=current_prompt,
+                        thread_id=clean_thread_id,
+                        response_mode=effective_response_mode,
+                        system_prompt=system_prompt,
+                    ):
+                        if first_token_at is None:
+                            first_token_at = time.monotonic()
+                        raw_parts.append(delta)
+                        yield sse_event("delta", {"text": delta})
+
+                    raw_reply = "".join(raw_parts)
+                    safe_reply = check_output(raw_reply)
+                    total_ms = round((time.monotonic() - started_at) * 1000)
+                    first_token_ms = (
+                        round((first_token_at - started_at) * 1000)
+                        if first_token_at is not None
+                        else None
+                    )
+                    logger.info(
+                        "Recipe stream completed for thread %s: first_token_ms=%s total_ms=%d chars=%d",
+                        clean_thread_id,
+                        first_token_ms,
+                        total_ms,
+                        len(safe_reply),
+                    )
+                    if effective_response_mode == RESPONSE_MODE_RECIPE_OPTIONS:
+                        log_request_usage(
+                            request,
+                            session_id=session_id,
+                            event_type="recipe_options_shown",
+                            response_mode=effective_response_mode,
+                            model_provider=recipe_provider_label(),
+                            success=True,
+                            status_code=200,
+                        )
+                    log_request_usage(
+                        request,
+                        session_id=session_id,
+                        event_type="chat_success",
+                        response_mode=effective_response_mode,
+                        model_provider=recipe_provider_label(),
+                        success=True,
+                        attachment_type=attachment_type,
+                        status_code=200,
+                    )
+                    yield sse_event(
+                        "done",
+                        {"reply": safe_reply, "response_mode": effective_response_mode},
+                    )
+                except HTTPException as exc:
+                    log_request_usage(
+                        request,
+                        session_id=session_id,
+                        event_type="chat_error",
+                        response_mode=effective_response_mode,
+                        model_provider=recipe_provider_label(),
+                        success=False,
+                        attachment_type=attachment_type,
+                        status_code=exc.status_code,
+                        error_category=error_category_for_http_exception(exc),
+                    )
+                    yield sse_event("error", {"detail": exc.detail, "status": exc.status_code})
+                except Exception:
+                    logger.exception("Recipe stream failed for thread %s", clean_thread_id)
+                    log_request_usage(
+                        request,
+                        session_id=session_id,
+                        event_type="chat_error",
+                        response_mode=effective_response_mode,
+                        model_provider=recipe_provider_label(),
+                        success=False,
+                        attachment_type=attachment_type,
+                        status_code=502,
+                        error_category="upstream_error",
+                    )
+                    yield sse_event(
+                        "error",
+                        {
+                            "detail": f"Shef could not generate a recipe response with the {recipe_provider_label()} chat model.",
+                            "status": 502,
+                        },
+                    )
+
+            return StreamingResponse(
+                generate_events(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+
+        reply = await run_in_threadpool(
+            invoke_recipe_agent_sync,
+            history_messages=history_messages,
+            current_prompt=current_prompt,
+            thread_id=clean_thread_id,
+            response_mode=effective_response_mode,
+            system_prompt=system_prompt,
+        )
+        safe_reply = check_output(reply)
+        if effective_response_mode == RESPONSE_MODE_RECIPE_OPTIONS:
+            log_request_usage(
+                request,
+                session_id=session_id,
+                event_type="recipe_options_shown",
+                response_mode=effective_response_mode,
+                model_provider=recipe_provider_label(),
+                success=True,
+                status_code=200,
+            )
+        log_request_usage(
+            request,
+            session_id=session_id,
+            event_type="chat_success",
+            response_mode=effective_response_mode,
+            model_provider=recipe_provider_label(),
+            success=True,
+            attachment_type=attachment_type,
+            status_code=200,
         )
 
-    audio_transcript = None
-    if audio_data:
-        audio_transcript = await run_in_threadpool(transcribe_audio_sync, audio_data)
-        audio_transcript = check_input(
-            audio_transcript,
-            field_name="Audio transcript",
-            max_chars=MAX_EXTRACTED_CONTEXT_CHARS,
+        return {"reply": safe_reply, "response_mode": effective_response_mode}
+    except HTTPException as exc:
+        log_request_usage(
+            request,
+            session_id=session_id,
+            event_type="chat_error",
+            response_mode=effective_response_mode,
+            model_provider=recipe_provider_label(),
+            success=False,
+            attachment_type=attachment_type,
+            status_code=exc.status_code,
+            error_category=pending_error_category or error_category_for_http_exception(exc),
         )
-
-    if not has_recipe_relevant_input(clean_message, image_ingredients, audio_transcript):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Upload or describe visible food, cooking ingredients, or a prepared dish "
-                "so Shef can suggest a recipe."
-            ),
+        raise
+    except Exception:
+        logger.exception("Chat request failed unexpectedly")
+        log_request_usage(
+            request,
+            session_id=session_id,
+            event_type="chat_error",
+            response_mode=effective_response_mode,
+            model_provider=recipe_provider_label(),
+            success=False,
+            attachment_type=attachment_type,
+            status_code=500,
+            error_category="server_error",
         )
-
-    effective_response_mode = resolve_response_mode(
-        response_mode,
-        message=clean_message,
-        image_ingredients=image_ingredients,
-        audio_transcript=audio_transcript,
-    )
-    system_prompt = system_prompt_for_response_mode(effective_response_mode)
-
-    search_seed = "\n".join(
-        part
-        for part in [clean_message, image_ingredients or "", audio_transcript or ""]
-        if part.strip()
-    )
-    search_context = await run_in_threadpool(recipe_search_sync, search_seed, clean_thread_id)
-    current_prompt = build_current_prompt(
-        message=clean_message,
-        image_ingredients=image_ingredients,
-        audio_transcript=audio_transcript,
-        search_context=search_context,
-    )
-
-    if "text/event-stream" in request.headers.get("accept", ""):
-        def generate_events() -> Iterator[str]:
-            started_at = time.monotonic()
-            first_token_at: float | None = None
-            raw_parts: list[str] = []
-
-            try:
-                yield sse_event(
-                    "meta",
-                    {
-                        "response_mode": effective_response_mode,
-                        "recipe_provider": recipe_provider_label(),
-                    },
-                )
-                for delta in stream_recipe_agent_sync(
-                    history_messages=history_messages,
-                    current_prompt=current_prompt,
-                    thread_id=clean_thread_id,
-                    response_mode=effective_response_mode,
-                    system_prompt=system_prompt,
-                ):
-                    if first_token_at is None:
-                        first_token_at = time.monotonic()
-                    raw_parts.append(delta)
-                    yield sse_event("delta", {"text": delta})
-
-                raw_reply = "".join(raw_parts)
-                safe_reply = check_output(raw_reply)
-                total_ms = round((time.monotonic() - started_at) * 1000)
-                first_token_ms = (
-                    round((first_token_at - started_at) * 1000)
-                    if first_token_at is not None
-                    else None
-                )
-                logger.info(
-                    "Recipe stream completed for thread %s: first_token_ms=%s total_ms=%d chars=%d",
-                    clean_thread_id,
-                    first_token_ms,
-                    total_ms,
-                    len(safe_reply),
-                )
-                yield sse_event(
-                    "done",
-                    {"reply": safe_reply, "response_mode": effective_response_mode},
-                )
-            except HTTPException as exc:
-                yield sse_event("error", {"detail": exc.detail, "status": exc.status_code})
-            except Exception:
-                logger.exception("Recipe stream failed for thread %s", clean_thread_id)
-                yield sse_event(
-                    "error",
-                    {
-                        "detail": f"Shef could not generate a recipe response with the {recipe_provider_label()} chat model.",
-                        "status": 502,
-                    },
-                )
-
-        return StreamingResponse(
-            generate_events(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
-        )
-
-    reply = await run_in_threadpool(
-        invoke_recipe_agent_sync,
-        history_messages=history_messages,
-        current_prompt=current_prompt,
-        thread_id=clean_thread_id,
-        response_mode=effective_response_mode,
-        system_prompt=system_prompt,
-    )
-
-    return {"reply": check_output(reply), "response_mode": effective_response_mode}
+        raise
 
 
 if STATIC_DIR.exists():

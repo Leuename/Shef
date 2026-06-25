@@ -16,6 +16,10 @@ _Avoid_: Session, support chat
 A saved Recipe Chat stored in the user's browser rather than on a server.
 _Avoid_: Server chat, cloud chat
 
+**Anonymous Usage Event**:
+A non-content record that a broad Shef interaction happened, associated only with an anonymous session.
+_Avoid_: Chat transcript, analytics profile
+
 **Attachment Extraction**:
 The process of turning an uploaded ingredient image or voice note into text context for Shef.
 _Avoid_: Upload parsing, file processing

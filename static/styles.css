@@ -25,6 +25,7 @@
 html,
 body {
   height: 100%;
+  overflow: hidden;
 }
 
 body {
@@ -50,7 +51,10 @@ button {
 .app-shell {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
-  min-height: 100vh;
+  min-height: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(239, 78, 59, 0.08), transparent 34%),
     linear-gradient(180deg, #ffffff 0%, #f8faf6 100%);
@@ -60,7 +64,10 @@ button {
   display: flex;
   flex-direction: column;
   gap: 28px;
-  min-height: 100vh;
+  min-height: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   padding: 28px 18px;
   background: rgba(255, 255, 255, 0.88);
   border-right: 1px solid var(--line);
@@ -144,12 +151,23 @@ button {
 
 .recent-section {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-list {
   display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
   gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  scrollbar-gutter: stable;
 }
 
 .empty-chat-list {
@@ -228,6 +246,7 @@ button {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
   gap: 12px;
+  flex: 0 0 auto;
   margin-top: auto;
   padding: 14px;
   border: 1px solid #a8d39f;
@@ -252,7 +271,11 @@ button {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
+  height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
 }
 
 .chat-header {
@@ -309,6 +332,27 @@ button {
 .header-actions button:hover {
   background: var(--green-soft);
   color: var(--green-dark);
+}
+
+.header-actions .privacy-button {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  height: auto;
+  padding: 6px 0;
+  border-radius: 0;
+  color: var(--muted);
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.2;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.header-actions .privacy-button:hover,
+.header-actions .privacy-button:focus-visible {
+  color: var(--green-dark);
+  background: transparent;
 }
 
 .message-list {
@@ -601,6 +645,90 @@ button {
   outline-offset: 2px;
 }
 
+.recipe-option-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 170;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(22, 29, 24, 0.42);
+  backdrop-filter: blur(8px);
+}
+
+.recipe-option-dialog {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  width: min(440px, 100%);
+  max-height: calc(100svh - 36px);
+  overflow-y: auto;
+  padding: 22px;
+  border: 1px solid #f1d4b8;
+  border-radius: var(--radius-sm);
+  background: #fffaf2;
+  box-shadow: 0 24px 70px rgba(24, 33, 27, 0.24);
+}
+
+.recipe-option-dialog h2 {
+  margin: 0 42px 0 0;
+  color: #1f311e;
+  font-size: 21px;
+  line-height: 1.25;
+}
+
+.recipe-option-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  background: #f0f2ee;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.recipe-option-close:hover,
+.recipe-option-close:focus-visible {
+  color: var(--text);
+  background: var(--green-soft);
+}
+
+.recipe-option-dialog .recipe-option-description {
+  position: static;
+  display: grid;
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  transition: none;
+  visibility: visible;
+}
+
+.recipe-option-dialog .recipe-option-description::after {
+  display: none;
+}
+
+.recipe-option-dialog .recipe-option-description p {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.recipe-option-dialog .recipe-option-confirm {
+  justify-self: stretch;
+  width: 100%;
+}
+
 .recipe-option-selected {
   justify-self: start;
   padding: 4px 9px;
@@ -633,11 +761,6 @@ button {
 
   .recipe-option-description::after {
     display: none;
-  }
-
-  .recipe-option-card.is-expanded .recipe-option-description {
-    display: grid;
-    visibility: visible;
   }
 }
 
@@ -984,9 +1107,9 @@ button:disabled,
     inset: 0 auto 0 0;
     z-index: 40;
     width: min(84vw, 320px);
-    min-height: 100svh;
+    height: 100svh;
     max-height: 100svh;
-    overflow-y: auto;
+    overflow: hidden;
     padding: 22px 18px;
     background: rgba(255, 255, 255, 0.98);
     box-shadow: 22px 0 52px rgba(24, 33, 27, 0.2);
@@ -1038,6 +1161,7 @@ button:disabled,
   }
 
   .chat-panel {
+    height: 100svh;
     max-height: 100svh;
   }
 
@@ -1067,7 +1191,7 @@ button:disabled,
   }
 
   .header-actions {
-    display: none;
+    display: flex;
   }
 
   .message-list {
@@ -1153,6 +1277,78 @@ button:disabled,
 }
 
 /* ── Toast Notifications ── */
+
+/* Privacy notice */
+
+.privacy-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(22, 29, 24, 0.44);
+  backdrop-filter: blur(8px);
+}
+
+.privacy-modal[hidden] {
+  display: none;
+}
+
+.privacy-dialog {
+  position: relative;
+  width: min(480px, 100%);
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(24, 33, 27, 0.24);
+}
+
+.privacy-dialog h2 {
+  margin: 0 42px 12px 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.privacy-dialog p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.privacy-dialog p + p {
+  margin-top: 12px;
+}
+
+.privacy-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  background: #f0f2ee;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.privacy-close:hover,
+.privacy-close:focus-visible {
+  color: var(--text);
+  background: var(--green-soft);
+}
+
+body.modal-open {
+  overflow: hidden;
+}
 
 .toast-container {
   position: fixed;

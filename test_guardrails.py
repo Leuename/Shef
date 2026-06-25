@@ -644,12 +644,31 @@ class TestRecipeProviderConfig(unittest.TestCase):
 
         lc.get_recipe_model.cache_clear()
 
-    def test_defaults_to_nvidia_nim(self):
+    def test_defaults_to_openmodel(self):
         import lc
 
         with patch.dict("os.environ", {}, clear=True):
-            self.assertTrue(lc.use_nvidia_nim_api())
-            self.assertEqual(lc.recipe_provider_label(), "NVIDIA NIM")
+            self.assertFalse(lc.use_nvidia_nim_api())
+            self.assertEqual(lc.recipe_provider_label(), "OpenModel")
+
+    def test_default_recipe_model_uses_openmodel_key(self):
+        import lc
+
+        with patch.dict(
+            "os.environ",
+            {
+                "OPEN_MODEL_KEY": "test-openmodel-key",
+            },
+            clear=True,
+        ):
+            with patch.object(lc.anthropic, "Anthropic") as anthropic_client:
+                model = lc.get_recipe_model()
+
+        self.assertIsInstance(model, lc.OpenModelMessagesModel)
+        anthropic_client.assert_called_once()
+        _, kwargs = anthropic_client.call_args
+        self.assertEqual(kwargs["base_url"], lc.OPENMODEL_BASE_URL)
+        self.assertEqual(model.model, lc.OPENMODEL_MODEL)
 
     def test_false_switch_uses_openmodel(self):
         import lc
