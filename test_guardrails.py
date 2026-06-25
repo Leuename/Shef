@@ -596,15 +596,57 @@ class TestRecipeProviderConfig(unittest.TestCase):
             },
             clear=True,
         ):
-            with patch.object(lc, "ChatOpenAI") as chat_openai:
-                chat_openai.return_value = object()
+            with patch.object(lc.anthropic, "Anthropic") as anthropic_client:
                 model = lc.get_recipe_model()
 
-        self.assertIs(model, chat_openai.return_value)
-        chat_openai.assert_called_once()
-        _, kwargs = chat_openai.call_args
-        self.assertEqual(kwargs["model"], lc.OPENMODEL_MODEL)
+        self.assertIsInstance(model, lc.OpenModelMessagesModel)
+        anthropic_client.assert_called_once()
+        _, kwargs = anthropic_client.call_args
         self.assertEqual(kwargs["base_url"], lc.OPENMODEL_BASE_URL)
+        self.assertEqual(model.model, lc.OPENMODEL_MODEL)
+
+    def test_openmodel_payload_uses_messages_protocol_shape(self):
+        import lc
+
+        with patch.object(lc.anthropic, "Anthropic"):
+            model = lc.OpenModelMessagesModel(
+                api_key="test-openmodel-key",
+                base_url=lc.OPENMODEL_BASE_URL,
+                model=lc.OPENMODEL_MODEL,
+                temperature=0.35,
+                max_tokens=1600,
+            )
+
+        payload = model._payload(
+            [
+                lc.SystemMessage(content="system"),
+                lc.HumanMessage(content="hello"),
+                lc.AIMessage(content="hi"),
+                lc.HumanMessage(content="cook sinigang"),
+            ]
+        )
+
+        self.assertEqual(payload["model"], lc.OPENMODEL_MODEL)
+        self.assertEqual(payload["system"], "system")
+        self.assertEqual(payload["max_tokens"], 1600)
+        self.assertEqual(
+            payload["messages"],
+            [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi"},
+                {"role": "user", "content": "cook sinigang"},
+            ],
+        )
+
+    def test_openmodel_content_parser_ignores_thinking_blocks(self):
+        import lc
+
+        content = [
+            type("ThinkingBlock", (), {"type": "thinking", "thinking": "internal"})(),
+            type("TextBlock", (), {"type": "text", "text": "ok"})(),
+        ]
+
+        self.assertEqual(lc.anthropic_message_content_to_text(content), "ok")
 
     def test_true_switch_uses_nvidia_nim(self):
         import lc
