@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 import time
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from fastapi import HTTPException
 
@@ -568,6 +568,63 @@ class TestPromptCache(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 #  Run
 # ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestRecipeProviderConfig(unittest.TestCase):
+    """Tests for selecting the recipe chat provider without external API calls."""
+
+    def tearDown(self):
+        import lc
+
+        lc.get_recipe_model.cache_clear()
+
+    def test_defaults_to_nvidia_nim(self):
+        import lc
+
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertTrue(lc.use_nvidia_nim_api())
+            self.assertEqual(lc.recipe_provider_label(), "NVIDIA NIM")
+
+    def test_false_switch_uses_openmodel(self):
+        import lc
+
+        with patch.dict(
+            "os.environ",
+            {
+                "USE_NVIDIA_NIM_API": "false",
+                "OPEN_MODEL_KEY": "test-openmodel-key",
+            },
+            clear=True,
+        ):
+            with patch.object(lc, "ChatOpenAI") as chat_openai:
+                chat_openai.return_value = object()
+                model = lc.get_recipe_model()
+
+        self.assertIs(model, chat_openai.return_value)
+        chat_openai.assert_called_once()
+        _, kwargs = chat_openai.call_args
+        self.assertEqual(kwargs["model"], lc.OPENMODEL_MODEL)
+        self.assertEqual(kwargs["base_url"], lc.OPENMODEL_BASE_URL)
+
+    def test_true_switch_uses_nvidia_nim(self):
+        import lc
+
+        with patch.dict(
+            "os.environ",
+            {
+                "USE_NVIDIA_NIM_API": "true",
+                "NVIDIA_API_KEY": "test-nvidia-key",
+            },
+            clear=True,
+        ):
+            with patch.object(lc, "ChatNVIDIA") as chat_nvidia:
+                chat_nvidia.return_value = object()
+                model = lc.get_recipe_model()
+
+        self.assertIs(model, chat_nvidia.return_value)
+        chat_nvidia.assert_called_once()
+        _, kwargs = chat_nvidia.call_args
+        self.assertEqual(kwargs["model"], lc.FINAL_MODEL)
 
 
 class TestStreamingRecipeGeneration(unittest.TestCase):

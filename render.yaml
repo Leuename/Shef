@@ -12,6 +12,8 @@ services:
         sync: false
       - key: NVIDIA_API_KEY
         sync: false
+      - key: USE_NVIDIA_NIM_API
+        value: "true"
       - key: PARAKEET_API_KEY
         sync: false
       - key: META_API_KEY

@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
+from langchain_openai import ChatOpenAI
 from starlette.concurrency import run_in_threadpool
 
 try:
@@ -59,6 +60,8 @@ SHARED_ENV = Path(r"C:\Mine\code\langchain\.env")
 APP_ENV = APP_DIR / ".env"
 
 FINAL_MODEL = "deepseek-ai/deepseek-v4-pro"
+OPENMODEL_MODEL = "deepseek-v4-flash"
+OPENMODEL_BASE_URL = "https://api.openmodel.ai/v1"
 VISION_MODEL = "meta/llama-3.2-11b-vision-instruct"
 PARAKEET_FUNCTION_ID = "d3fe9151-442b-4204-a70d-5fcc597fd610"
 RIVA_SERVER = "grpc.nvcf.nvidia.com:443"
@@ -319,6 +322,23 @@ def require_env(name: str, *, fallback: str | None = None) -> str:
     )
 
 
+def env_flag(name: str, *, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def use_nvidia_nim_api() -> bool:
+    return env_flag("USE_NVIDIA_NIM_API", default=True)
+
+
+def recipe_provider_label() -> str:
+    if use_nvidia_nim_api():
+        return "NVIDIA NIM"
+    return "OpenModel"
+
+
 def validate_response_mode(response_mode: str) -> str:
     mode = (response_mode or RESPONSE_MODE_AUTO).strip().lower()
     if mode not in RESPONSE_MODES:
@@ -388,7 +408,17 @@ def require_riva_client() -> Any:
 
 
 @lru_cache(maxsize=1)
-def get_recipe_model() -> ChatNVIDIA:
+def get_recipe_model() -> ChatNVIDIA | ChatOpenAI:
+    if not use_nvidia_nim_api():
+        api_key = require_env("OPEN_MODEL_KEY")
+        return ChatOpenAI(
+            model=OPENMODEL_MODEL,
+            api_key=api_key,
+            base_url=os.getenv("OPENMODEL_BASE_URL", OPENMODEL_BASE_URL),
+            temperature=0.35,
+            max_tokens=1600,
+        )
+
     api_key = require_env("NVIDIA_API_KEY")
     return ChatNVIDIA(
         model=FINAL_MODEL,
@@ -730,7 +760,7 @@ def invoke_recipe_agent_sync(
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
-                detail="Shef could not generate a recipe response with the NVIDIA chat model.",
+                detail=f"Shef could not generate a recipe response with the {recipe_provider_label()} chat model.",
             ) from exc
 
         text = message_content_to_text(getattr(result, "content", ""))
@@ -794,7 +824,7 @@ def stream_recipe_agent_sync(
             if yielded_any:
                 raise HTTPException(
                     status_code=502,
-                    detail="Shef could not generate a complete recipe response with the NVIDIA chat model.",
+                    detail=f"Shef could not generate a complete recipe response with the {recipe_provider_label()} chat model.",
                 ) from exc
             last_exc = exc
 
@@ -948,7 +978,7 @@ async def chat(
                 yield sse_event(
                     "error",
                     {
-                        "detail": "Shef could not generate a recipe response with the NVIDIA chat model.",
+                        "detail": f"Shef could not generate a recipe response with the {recipe_provider_label()} chat model.",
                         "status": 502,
                     },
                 )
