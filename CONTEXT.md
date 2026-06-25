@@ -20,6 +20,14 @@ _Avoid_: Server chat, cloud chat
 The process of turning an uploaded ingredient image or voice note into text context for Shef.
 _Avoid_: Upload parsing, file processing
 
+**Ingredient Attachment**:
+An uploaded image or voice note that contains visible or spoken edible food, cooking ingredients, or a prepared dish Shef can use.
+_Avoid_: Any image, any audio
+
+**Non-Ingredient Attachment**:
+An uploaded image or voice note that does not contain edible food, cooking ingredients, or a prepared dish, such as a portrait, selfie, document, room, or object.
+_Avoid_: Bad upload, invalid file
+
 **Recipe-Relevant Input**:
 Current-turn text, image extraction, or audio transcript that contains ingredients, a dish, or a cooking intent Shef can act on.
 _Avoid_: Any upload, any message

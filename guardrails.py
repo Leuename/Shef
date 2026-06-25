@@ -152,6 +152,7 @@ FOOD_RELEVANCE_TERMS: tuple[str, ...] = (
 )
 
 NON_INGREDIENT_EXTRACTION_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^\s*not[_\s-]?ingredients?\s*:", re.IGNORECASE),
     re.compile(
         r"\bno\s+(?:edible\s+|kitchen\s+|visible\s+)*"
         r"(?:ingredients?|food|items?)\s+(?:are\s+|were\s+)?"
@@ -166,6 +167,10 @@ NON_INGREDIENT_EXTRACTION_PATTERNS: tuple[re.Pattern[str], ...] = (
         r"\b(?:image|photo|picture)\s+(?:does\s+not|doesn't)\s+"
         r"(?:show|contain|include)\s+(?:any\s+)?"
         r"(?:ingredients?|food|edible\s+items?)\b"
+    ),
+    re.compile(
+        r"\b(?:image|photo|picture)\s+(?:shows|contains|features)\s+"
+        r"(?:a\s+)?(?:person|people|man|woman|boy|girl|selfie|portrait)\b"
     ),
 )
 
@@ -486,6 +491,8 @@ def _looks_like_extracted_ingredient_list(text: str) -> bool:
     haystack = _normalise_text(text)
     if any(term in haystack for term in NON_FOOD_MEDIA_TERMS):
         return False
+    if "ingredients:" in haystack:
+        haystack = haystack.split("ingredients:", 1)[1].strip()
     return "," in haystack and len(haystack.split()) <= 40
 
 

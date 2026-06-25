@@ -207,6 +207,9 @@ class TestRecipeRelevantInput(unittest.TestCase):
     def test_allows_image_ingredient_extraction(self):
         self.assertTrue(has_recipe_relevant_input("", "pork belly, onion, calamansi"))
 
+    def test_allows_labeled_image_ingredient_extraction(self):
+        self.assertTrue(has_recipe_relevant_input("", "INGREDIENTS: pork belly, onion, calamansi"))
+
     def test_allows_audio_ingredient_transcript(self):
         self.assertTrue(has_recipe_relevant_input("", None, "I have eggs, tomato, and onion"))
 
@@ -225,6 +228,24 @@ class TestRecipeRelevantInput(unittest.TestCase):
             )
         )
 
+    def test_rejects_labeled_non_ingredient_image_extraction(self):
+        self.assertFalse(
+            has_recipe_relevant_input(
+                "",
+                "NOT_INGREDIENTS: no edible cooking ingredients are visible.",
+                None,
+            )
+        )
+
+    def test_rejects_portrait_image_extraction(self):
+        self.assertFalse(
+            has_recipe_relevant_input(
+                "",
+                "The image shows a person in formal clothing.",
+                None,
+            )
+        )
+
     def test_rejects_empty_audio_transcript(self):
         self.assertFalse(has_recipe_relevant_input("", None, ""))
 
@@ -237,6 +258,12 @@ class TestNonIngredientExtraction(unittest.TestCase):
 
     def test_detects_no_edible_items(self):
         self.assertTrue(is_non_ingredient_extraction("I do not see any edible kitchen items."))
+
+    def test_detects_labeled_non_ingredients(self):
+        self.assertTrue(is_non_ingredient_extraction("NOT_INGREDIENTS: no edible cooking ingredients are visible."))
+
+    def test_detects_portrait_description(self):
+        self.assertTrue(is_non_ingredient_extraction("The photo shows a person in formal clothing."))
 
     def test_does_not_reject_real_ingredients(self):
         self.assertFalse(is_non_ingredient_extraction("pork belly, onion, calamansi"))

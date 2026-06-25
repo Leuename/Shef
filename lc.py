@@ -631,8 +631,13 @@ def extract_image_ingredients_sync(data: bytes, upload: UploadFile) -> str:
         {
             "type": "text",
             "text": (
-                "Identify edible kitchen ingredients visible in this image. "
-                "Return a concise comma-separated list. If no ingredients are visible, say that."
+                "First decide whether this image shows edible food, cooking ingredients, "
+                "or a prepared dish. If it does, respond exactly as "
+                "'INGREDIENTS: item one, item two' using only visible food items. "
+                "If it shows a person, selfie, portrait, document, room, object, or anything "
+                "without visible edible food, respond exactly as "
+                "'NOT_INGREDIENTS: no edible cooking ingredients are visible.' "
+                "Do not infer ingredients from clothing, context, or the user's identity."
             ),
         },
         {"type": "image_url", "image_url": {"url": data_url_for_upload(data, upload)}},
@@ -975,7 +980,10 @@ async def chat(
     if not has_recipe_relevant_input(clean_message, image_ingredients, audio_transcript):
         raise HTTPException(
             status_code=400,
-            detail="Send ingredients or a cooking question by text, image, or voice so Shef can help with a recipe.",
+            detail=(
+                "Upload or describe visible food, cooking ingredients, or a prepared dish "
+                "so Shef can suggest a recipe."
+            ),
         )
 
     effective_response_mode = resolve_response_mode(
