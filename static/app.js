@@ -1353,9 +1353,6 @@ const sendMessage = async ({
       },
       onChunk: (chunk, mode) => {
         effectiveResponseMode = mode;
-        if (mode === RESPONSE_MODE_RECIPE_OPTIONS) {
-          return;
-        }
         streamedReply += chunk;
         updateStreamingReply(streamedReply);
       },
