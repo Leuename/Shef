@@ -27,3 +27,19 @@ _Avoid_: Any upload, any message
 **Recipe Search**:
 The web lookup Shef uses to ground recipe suggestions before answering.
 _Avoid_: Browsing, scraping
+
+**Recipe Option Selection**:
+A Recipe Chat interaction where Shef first shows only 3-5 recipe title buttons for a broad cooking request, then gives the full recipe only after the user chooses one.
+_Avoid_: Showing all recipe details at once, dumping every option
+
+**Recipe Option Click**:
+A user's choice of one recipe title from Recipe Option Selection, recorded as a normal Recipe Chat message so Shef can answer with that exact full recipe.
+_Avoid_: Hidden selection, client-only reveal
+
+**Recipe Option Description**:
+A short hover or focus description attached to a recipe title button during Recipe Option Selection, written in three compact parts: flavor and texture, occasion and fit, and a pro tip.
+_Avoid_: Full recipe preview, ingredient list, cooking steps
+
+**Recipe Option Confirmation**:
+The mobile or touch-screen step where a user taps a recipe title to reveal its Recipe Option Description, then taps a green confirmation button to request the full recipe.
+_Avoid_: Immediate mobile selection, accidental recipe request

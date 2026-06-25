@@ -210,6 +210,9 @@ class TestRecipeRelevantInput(unittest.TestCase):
     def test_allows_audio_ingredient_transcript(self):
         self.assertTrue(has_recipe_relevant_input("", None, "I have eggs, tomato, and onion"))
 
+    def test_allows_filipino_ingredient_names(self):
+        self.assertTrue(has_recipe_relevant_input("talong, itlog, sibuyas, kamatis,"))
+
     def test_rejects_unrelated_text(self):
         self.assertFalse(has_recipe_relevant_input("Here is my profile photo"))
 
@@ -565,6 +568,37 @@ class TestPromptCache(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════
 #  Run
 # ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestStreamingRecipeGeneration(unittest.TestCase):
+    """Tests for streaming response assembly."""
+
+    def test_preserves_whitespace_between_streamed_chunks(self):
+        import lc
+
+        original_get_recipe_model = lc.get_recipe_model
+        lc._prompt_cache.clear()
+
+        class FakeModel:
+            def stream(self, messages):
+                del messages
+                for content in ["Tortang", " Talong", " with ", "kamatis"]:
+                    yield type("Chunk", (), {"content": content})()
+
+        lc.get_recipe_model = lambda: FakeModel()
+        try:
+            chunks = list(
+                lc.stream_recipe_agent_sync(
+                    history_messages=[],
+                    current_prompt="Use talong and kamatis",
+                    thread_id="test-stream",
+                )
+            )
+        finally:
+            lc.get_recipe_model = original_get_recipe_model
+            lc._prompt_cache.clear()
+
+        self.assertEqual("".join(chunks), "Tortang Talong with kamatis")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,9 @@ const API_ENDPOINT = "/api/chat";
 const STORAGE_KEY = "shef.chats.v1";
 const MAX_CHATS = 10;
 const TARGET_AUDIO_SAMPLE_RATE = 16000;
+const RESPONSE_MODE_AUTO = "auto";
+const RESPONSE_MODE_RECIPE_OPTIONS = "recipe_options";
+const RESPONSE_MODE_FULL_RECIPE = "full_recipe";
 const WELCOME_TEXT =
   "Hi, I am Shef. Send ingredients by text, image, or voice and I will help you turn them into a recipe.";
 const MAX_MESSAGE_CHARS = 2000;
@@ -54,6 +57,7 @@ let recordingStartedAt = 0;
 let recordingInterval = null;
 let typingNode = null;
 let isSending = false;
+let expandedRecipeOptionKey = "";
 
 const createId = () =>
   window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
@@ -105,6 +109,9 @@ const INLINE_MARKDOWN_PATTERN =
 
 const RECIPE_SECTION_LABELS =
   /^(Recipe Name|Recipe|Ingredients|Instructions|Steps|Method|Tips|Notes|Substitutions|Pantry Items|Optional Pantry Items|Recipe Options|Option\s+\d+)\s*:\s*(.*)$/i;
+const RECIPE_OPTION_TITLE_PATTERN = /^\s*(\d+)[.)]\s+(.+)$/;
+const RECIPE_OPTION_DESCRIPTION_PATTERN =
+  /^\s*(?:[-*\u2022]\s*)?(?:\*\*)?(Flavor\s*(?:&|and)\s*Texture|Occasion\s*(?:&|and)\s*Fit|Pro\s*Tip)(?:\*\*)?\s*(?:\u2014|\u2013|-|:)\s*(.+)$/i;
 
 const stripMarkdownDecorators = (value) =>
   String(value ?? "")
@@ -113,6 +120,78 @@ const stripMarkdownDecorators = (value) =>
     .replace(/__/g, "")
     .replace(/`/g, "")
     .trim();
+
+const normaliseDescriptionKey = (label) =>
+  stripMarkdownDecorators(label)
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
+
+const descriptionKeyForLabel = (label) => {
+  const key = normaliseDescriptionKey(label);
+  if (key.includes("flavor") && key.includes("texture")) return "flavorTexture";
+  if (key.includes("occasion") && key.includes("fit")) return "occasionFit";
+  if (key.includes("pro") && key.includes("tip")) return "proTip";
+  return "";
+};
+
+const parseRecipeOptions = (text) => {
+  const lines = String(text ?? "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const options = [];
+  let current = null;
+
+  const commitCurrent = () => {
+    if (!current?.title) return;
+    options.push({
+      title: current.title,
+      descriptions: {
+        flavorTexture: current.descriptions.flavorTexture || "",
+        occasionFit: current.descriptions.occasionFit || "",
+        proTip: current.descriptions.proTip || "",
+      },
+    });
+  };
+
+  lines.forEach((line) => {
+    if (/^recipe options\s*:?\s*$/i.test(stripMarkdownDecorators(line))) {
+      return;
+    }
+
+    const titleMatch = line.match(RECIPE_OPTION_TITLE_PATTERN);
+    if (titleMatch) {
+      commitCurrent();
+      current = {
+        title: stripMarkdownDecorators(titleMatch[2]).replace(/[:.]\s*$/, ""),
+        descriptions: {},
+      };
+      return;
+    }
+
+    const descriptionMatch = line.match(RECIPE_OPTION_DESCRIPTION_PATTERN);
+    if (current && descriptionMatch) {
+      const descriptionKey = descriptionKeyForLabel(descriptionMatch[1]);
+      if (descriptionKey) {
+        current.descriptions[descriptionKey] = stripMarkdownDecorators(descriptionMatch[2]);
+      }
+    }
+  });
+
+  commitCurrent();
+
+  const uniqueTitles = new Set();
+  return options
+    .filter((option) => {
+      const key = option.title.toLowerCase();
+      if (!option.title || uniqueTitles.has(key)) return false;
+      uniqueTitles.add(key);
+      return true;
+    })
+    .slice(0, 5);
+};
 
 const appendInlineMarkdown = (parent, value) => {
   const text = String(value ?? "");
@@ -275,17 +354,17 @@ const TOAST_ICONS = {
 
 const TOAST_TITLES = {
   warning: "Input Blocked",
-  error: "Rate Limited",
+  error: "Request Failed",
   info: "Notice",
 };
 
-const showToast = (message, type = "warning", durationMs = 5000) => {
+const showToast = (message, type = "warning", durationMs = 5000, title = "") => {
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
   toast.innerHTML = `
     <span class="toast-icon" aria-hidden="true">${TOAST_ICONS[type] || TOAST_ICONS.warning}</span>
     <div class="toast-body">
-      <div class="toast-title">${TOAST_TITLES[type] || TOAST_TITLES.warning}</div>
+      <div class="toast-title">${escapeHtml(title || TOAST_TITLES[type] || TOAST_TITLES.warning)}</div>
       <div class="toast-message">${escapeHtml(message)}</div>
     </div>
     <button class="toast-close" type="button" aria-label="Dismiss">&times;</button>
@@ -316,6 +395,12 @@ const toastTypeForStatus = (status) => {
   if (status === 413) return "warning";
   if (status === 400) return "warning";
   return "error";
+};
+
+const toastTitleForStatus = (status) => {
+  if (status === 429) return "Rate Limited";
+  if (status === 413 || status === 400) return "Input Blocked";
+  return "Request Failed";
 };
 
 const PHONETIC_MAP = {
@@ -658,21 +743,151 @@ const createVoicePlayer = (attachment) => {
   return player;
 };
 
-const createMessageNode = ({ role, text, attachments = [], createdAt }) => {
+const createStreamingDots = () => {
+  const dots = document.createElement("span");
+  dots.className = "streaming-dots";
+  dots.setAttribute("aria-label", "Shef is typing");
+  dots.innerHTML = `
+    <span></span>
+    <span></span>
+    <span></span>
+  `;
+  return dots;
+};
+
+const isTouchInteraction = () =>
+  window.matchMedia("(hover: none), (pointer: coarse), (max-width: 700px)").matches;
+
+const createDescriptionLine = (label, value) => {
+  const line = document.createElement("p");
+  const strong = document.createElement("strong");
+  strong.textContent = label;
+  line.append(strong, document.createTextNode(value ? ` - ${value}` : " - "));
+  return line;
+};
+
+const createRecipeOptionDescription = (option) => {
+  const description = document.createElement("div");
+  description.className = "recipe-option-description";
+  description.append(
+    createDescriptionLine("Flavor & Texture", option.descriptions?.flavorTexture || "Balanced, cozy, and rice-ready."),
+    createDescriptionLine("Occasion & Fit", option.descriptions?.occasionFit || "A practical choice for everyday cooking."),
+    createDescriptionLine("Pro Tip", option.descriptions?.proTip || "Prep aromatics before heating the pan.")
+  );
+  return description;
+};
+
+const createRecipeOptionsNode = ({ messageId, options, selectedRecipeTitle = "" }) => {
+  const container = document.createElement("div");
+  container.className = "recipe-options";
+
+  const heading = document.createElement("p");
+  heading.className = "recipe-options-heading";
+  heading.textContent = "Choose one recipe:";
+  container.append(heading);
+
+  const list = document.createElement("div");
+  list.className = "recipe-options-list";
+
+  options.forEach((option) => {
+    const optionKey = `${messageId}:${option.title}`;
+    const isSelected = selectedRecipeTitle === option.title;
+    const hasSelection = Boolean(selectedRecipeTitle);
+    const isExpanded = expandedRecipeOptionKey === optionKey;
+
+    const item = document.createElement("div");
+    item.className = "recipe-option-card";
+    item.classList.toggle("is-selected", isSelected);
+    item.classList.toggle("is-disabled", hasSelection || isSending);
+    item.classList.toggle("is-expanded", isExpanded);
+
+    const titleButton = document.createElement("button");
+    titleButton.className = "recipe-option-title";
+    titleButton.type = "button";
+    titleButton.textContent = option.title;
+    titleButton.disabled = hasSelection || isSending;
+    titleButton.setAttribute("aria-label", `Select ${option.title}`);
+
+    titleButton.addEventListener("click", () => {
+      if (hasSelection || isSending) return;
+      if (isTouchInteraction()) {
+        expandedRecipeOptionKey = isExpanded ? "" : optionKey;
+        renderMessages();
+        return;
+      }
+      selectRecipeOption(messageId, option.title);
+    });
+
+    const description = createRecipeOptionDescription(option);
+
+    const confirmButton = document.createElement("button");
+    confirmButton.className = "recipe-option-confirm";
+    confirmButton.type = "button";
+    confirmButton.textContent = `Use ${option.title}`;
+    confirmButton.hidden = !isExpanded || hasSelection;
+    confirmButton.disabled = hasSelection || isSending;
+    confirmButton.addEventListener("click", () => {
+      if (hasSelection || isSending) return;
+      selectRecipeOption(messageId, option.title);
+    });
+
+    if (isSelected) {
+      const badge = document.createElement("span");
+      badge.className = "recipe-option-selected";
+      badge.textContent = "Selected";
+      item.append(titleButton, badge, description);
+    } else {
+      item.append(titleButton, description, confirmButton);
+    }
+
+    list.append(item);
+  });
+
+  container.append(list);
+  return container;
+};
+
+const createMessageNode = ({
+  id,
+  role,
+  text,
+  attachments = [],
+  createdAt,
+  isStreaming = false,
+  recipeOptions = [],
+  selectedRecipeTitle = "",
+}) => {
   const article = document.createElement("article");
   article.className = `message message-${role === "user" ? "user" : "assistant"}`;
 
   const bubble = document.createElement("div");
   bubble.className = `bubble ${role === "user" ? "user-bubble" : "assistant-bubble"}`;
 
-  if (text) {
-    if (role === "assistant") {
-      bubble.append(renderAssistantText(text));
-    } else {
-      const paragraph = document.createElement("p");
-      paragraph.innerHTML = escapeHtml(text).replaceAll("\n", "<br />");
-      bubble.append(paragraph);
+  if (role === "assistant") {
+    if (Array.isArray(recipeOptions) && recipeOptions.length >= 3 && !isStreaming) {
+      bubble.append(
+        createRecipeOptionsNode({
+          messageId: id,
+          options: recipeOptions,
+          selectedRecipeTitle,
+        })
+      );
+    } else if (text) {
+      const content = renderAssistantText(text);
+      if (isStreaming) {
+        const cursor = document.createElement("span");
+        cursor.className = "streaming-cursor";
+        cursor.setAttribute("aria-hidden", "true");
+        content.append(cursor);
+      }
+      bubble.append(content);
+    } else if (isStreaming) {
+      bubble.append(createStreamingDots());
     }
+  } else if (text) {
+    const paragraph = document.createElement("p");
+    paragraph.innerHTML = escapeHtml(text).replaceAll("\n", "<br />");
+    bubble.append(paragraph);
   }
 
   const hasImageOnly =
@@ -870,11 +1085,58 @@ function historyForApi(chat) {
     .map((message) => ({ role: message.role, text: message.text }));
 }
 
-const callChatApi = async ({ message, imageFile, audioBlob, audioName, threadId, history }) => {
+const parseSseEvent = (rawEvent) => {
+  const event = { type: "message", data: null };
+  const dataLines = [];
+
+  rawEvent
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .forEach((line) => {
+      if (line.startsWith("event:")) {
+        event.type = line.slice(6).trim() || "message";
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    });
+
+  if (dataLines.length) {
+    event.data = JSON.parse(dataLines.join("\n"));
+  }
+
+  return event;
+};
+
+const processSseBuffer = (buffer, onEvent) => {
+  const normalized = buffer.replace(/\r\n/g, "\n");
+  const events = normalized.split("\n\n");
+  const remainder = events.pop() || "";
+
+  events.forEach((rawEvent) => {
+    if (rawEvent.trim()) {
+      onEvent(parseSseEvent(rawEvent));
+    }
+  });
+
+  return remainder;
+};
+
+const callChatApi = async ({
+  message,
+  imageFile,
+  audioBlob,
+  audioName,
+  threadId,
+  history,
+  responseMode = RESPONSE_MODE_AUTO,
+  onMeta,
+  onChunk,
+}) => {
   const formData = new FormData();
   formData.append("message", message);
   formData.append("thread_id", threadId);
   formData.append("history", JSON.stringify(history));
+  formData.append("response_mode", responseMode);
 
   if (imageFile) {
     formData.append("image", imageFile, imageFile.name);
@@ -888,6 +1150,9 @@ const callChatApi = async ({ message, imageFile, audioBlob, audioName, threadId,
   try {
     response = await fetch(API_ENDPOINT, {
       method: "POST",
+      headers: {
+        Accept: "text/event-stream",
+      },
       body: formData,
     });
   } catch (networkErr) {
@@ -896,38 +1161,95 @@ const callChatApi = async ({ message, imageFile, audioBlob, audioName, threadId,
     throw err;
   }
 
-  let payload = null;
-  try {
-    const text = await response.text();
-    payload = text ? JSON.parse(text) : null;
-  } catch {
-    // Response body was not valid JSON — handled below
-  }
-
   if (!response.ok) {
+    let payload = null;
+    try {
+      const text = await response.text();
+      payload = text ? JSON.parse(text) : null;
+    } catch {
+      // Response body was not valid JSON, handled below.
+    }
     const detail = payload?.detail || `Chat API returned ${response.status}`;
     const err = new Error(detail);
     err.status = response.status;
     throw err;
   }
 
-  if (!payload || typeof payload.reply !== "string") {
-    throw new Error("Chat API response must include a reply string.");
+  if (!response.body) {
+    throw new Error("Chat API response did not include a readable stream.");
   }
 
-  return payload.reply;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let streamedText = "";
+  let finalReply = "";
+  let receivedDone = false;
+  let effectiveResponseMode = responseMode;
+
+  const handleEvent = ({ type, data }) => {
+    if (type === "meta") {
+      effectiveResponseMode = data?.response_mode || data?.responseMode || effectiveResponseMode;
+      onMeta?.(effectiveResponseMode);
+      return;
+    }
+
+    if (type === "delta" && typeof data?.text === "string") {
+      streamedText += data.text;
+      onChunk?.(data.text, effectiveResponseMode);
+      return;
+    }
+
+    if (type === "done" && typeof data?.reply === "string") {
+      finalReply = data.reply;
+      effectiveResponseMode = data?.response_mode || data?.responseMode || effectiveResponseMode;
+      receivedDone = true;
+      return;
+    }
+
+    if (type === "error") {
+      const err = new Error(data?.detail || "Shef could not respond. Check the server and try again.");
+      err.status = data?.status || 500;
+      throw err;
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    buffer = processSseBuffer(buffer, handleEvent);
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    processSseBuffer(`${buffer}\n\n`, handleEvent);
+  }
+
+  return {
+    reply: receivedDone ? finalReply : streamedText,
+    responseMode: effectiveResponseMode,
+  };
 };
 
-const sendMessage = async () => {
+const sendMessage = async ({
+  messageOverride = null,
+  responseMode = RESPONSE_MODE_AUTO,
+  sourceOptionMessageId = "",
+  selectedRecipeTitle = "",
+} = {}) => {
   if (isSending) return;
 
   const chat = getActiveChat();
   if (!chat) return;
 
-  const message = messageInput.value.trim();
-  const imageFile = imageAttachment?.file || null;
-  const audioBlob = audioAttachment?.blob || null;
-  const audioName = audioAttachment?.name || "voice-note.wav";
+  const hasMessageOverride = typeof messageOverride === "string";
+  const message = (hasMessageOverride ? messageOverride : messageInput.value).trim();
+  const imageFile = hasMessageOverride ? null : imageAttachment?.file || null;
+  const audioBlob = hasMessageOverride ? null : audioAttachment?.blob || null;
+  const audioName = hasMessageOverride
+    ? "voice-note.wav"
+    : audioAttachment?.name || "voice-note.wav";
 
   if (!message && !imageFile && !audioBlob) {
     showToast("Type a message, attach an image, or record audio first.", "warning");
@@ -962,8 +1284,19 @@ const sendMessage = async () => {
   const apiHistory = historyForApi(chat);
   const chatId = chat.id;
   const previousTitle = chat.title;
+  const optionMessage = sourceOptionMessageId
+    ? chat.messages.find((item) => item.id === sourceOptionMessageId)
+    : null;
+  const previousSelectedRecipeTitle = optionMessage?.selectedRecipeTitle || "";
   const createdAt = nowIso();
   const userMessageId = createId();
+  const assistantMessageId = createId();
+
+  if (optionMessage && selectedRecipeTitle) {
+    optionMessage.selectedRecipeTitle = selectedRecipeTitle;
+    expandedRecipeOptionKey = "";
+  }
+
   chat.messages.push({
     id: userMessageId,
     role: "user",
@@ -974,39 +1307,90 @@ const sendMessage = async () => {
   chat.updatedAt = createdAt;
   updateChatTitle(chat, message, submittedAttachments);
   saveState();
+  chat.messages.push({
+    id: assistantMessageId,
+    role: "assistant",
+    text: "",
+    attachments: [],
+    createdAt,
+    isStreaming: true,
+  });
   renderApp();
-  clearComposer();
-  showTyping();
+  if (!hasMessageOverride) {
+    clearComposer();
+  }
   setComposerBusy(true);
 
+  let streamedReply = "";
+  let effectiveResponseMode = responseMode;
+  const updateStreamingReply = (text, isFinal = false) => {
+    const targetChat = state.chats.find((item) => item.id === chatId);
+    const assistantMessage = targetChat?.messages.find((item) => item.id === assistantMessageId);
+    if (!assistantMessage) return;
+
+    assistantMessage.text = text;
+    assistantMessage.isStreaming = !isFinal;
+    if (isFinal) {
+      delete assistantMessage.isStreaming;
+    }
+
+    if (state.activeChatId === chatId) {
+      renderMessages();
+    }
+  };
+
   try {
-    const reply = await callChatApi({
+    const apiResult = await callChatApi({
       message,
       imageFile,
       audioBlob,
       audioName,
       threadId: chatId,
       history: apiHistory,
+      responseMode,
+      onMeta: (mode) => {
+        effectiveResponseMode = mode;
+      },
+      onChunk: (chunk, mode) => {
+        effectiveResponseMode = mode;
+        if (mode === RESPONSE_MODE_RECIPE_OPTIONS) {
+          return;
+        }
+        streamedReply += chunk;
+        updateStreamingReply(streamedReply);
+      },
     });
+    const reply = apiResult.reply;
+    effectiveResponseMode = apiResult.responseMode;
 
     const targetChat = state.chats.find((item) => item.id === chatId);
     if (targetChat) {
+      const assistantMessage = targetChat.messages.find((item) => item.id === assistantMessageId);
       const replyAt = nowIso();
-      targetChat.messages.push({
-        id: createId(),
-        role: "assistant",
-        text: reply,
-        attachments: [],
-        createdAt: replyAt,
-      });
-      targetChat.updatedAt = replyAt;
-      saveState();
+      if (assistantMessage) {
+        const parsedOptions =
+          effectiveResponseMode === RESPONSE_MODE_RECIPE_OPTIONS ? parseRecipeOptions(reply) : [];
+        assistantMessage.text = reply;
+        assistantMessage.recipeOptions = parsedOptions.length >= 3 ? parsedOptions : [];
+        assistantMessage.createdAt = replyAt;
+        delete assistantMessage.isStreaming;
+        targetChat.updatedAt = replyAt;
+        saveState();
+      }
     }
   } catch (error) {
     // Remove the failed user message from history
     const targetChat = state.chats.find((item) => item.id === chatId);
     if (targetChat) {
-      targetChat.messages = targetChat.messages.filter((m) => m.id !== userMessageId);
+      targetChat.messages = targetChat.messages.filter(
+        (m) => m.id !== userMessageId && m.id !== assistantMessageId
+      );
+      const targetOptionMessage = sourceOptionMessageId
+        ? targetChat.messages.find((item) => item.id === sourceOptionMessageId)
+        : null;
+      if (targetOptionMessage) {
+        targetOptionMessage.selectedRecipeTitle = previousSelectedRecipeTitle;
+      }
       targetChat.title = previousTitle;
       targetChat.updatedAt = targetChat.messages.length
         ? targetChat.messages[targetChat.messages.length - 1].createdAt
@@ -1015,19 +1399,31 @@ const sendMessage = async () => {
     }
 
     // Restore the typed text so the user doesn't lose their input
-    messageInput.value = message;
+    if (!hasMessageOverride) {
+      messageInput.value = message;
+    }
 
     const toastType = toastTypeForStatus(error.status);
     showToast(
       error.message || "Shef could not respond. Check the server and try again.",
-      toastType
+      toastType,
+      5000,
+      toastTitleForStatus(error.status)
     );
   } finally {
-    hideTyping();
     setComposerBusy(false);
     renderApp();
   }
 };
+
+function selectRecipeOption(messageId, recipeTitle) {
+  sendMessage({
+    messageOverride: `Show me the recipe for ${recipeTitle}.`,
+    responseMode: RESPONSE_MODE_FULL_RECIPE,
+    sourceOptionMessageId: messageId,
+    selectedRecipeTitle: recipeTitle,
+  });
+}
 
 const startRecordingTimer = () => {
   recordingStartedAt = Date.now();
