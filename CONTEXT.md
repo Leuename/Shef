@@ -20,8 +20,12 @@ _Avoid_: Server chat, cloud chat
 A non-content record that a broad Shef interaction happened, associated only with an anonymous session.
 _Avoid_: Chat transcript, analytics profile
 
+**Usage Logging Toggle**:
+A deployment setting that decides whether Shef records Anonymous Usage Events. When off, Shef does not create usage event records or anonymous usage sessions.
+_Avoid_: Debug logging switch, privacy popup state
+
 **Privacy Confirmation**:
-A first-visit acknowledgement where a user accepts Shef's anonymous usage and non-storage terms before using Recipe Chat.
+A first-visit acknowledgement where a user accepts Shef's current usage-data and non-storage terms before using Recipe Chat.
 _Avoid_: Privacy popup, legal wall
 
 **Attachment Extraction**:

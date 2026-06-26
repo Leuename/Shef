@@ -37,6 +37,7 @@ EVENT_TYPES = {
     "chat_error",
 }
 
+TRUE_VALUES = {"1", "true", "yes", "on"}
 SAFE_TEXT_RE = re.compile(r"[^a-zA-Z0-9 _./:-]")
 SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{8,80}$")
 
@@ -110,6 +111,10 @@ def utc_now_iso() -> str:
 
 def new_session_id() -> str:
     return uuid.uuid4().hex
+
+
+def usage_logging_enabled() -> bool:
+    return os.getenv("SHEF_USAGE_LOGGING_ENABLED", "false").strip().lower() in TRUE_VALUES
 
 
 def normalise_session_id(value: str | None) -> str:
@@ -201,6 +206,9 @@ def _postgres_connection():
 def init_usage_db() -> None:
     global _initialized_storage_key
 
+    if not usage_logging_enabled():
+        return
+
     storage_key = usage_storage_key()
     if _initialized_storage_key == storage_key:
         return
@@ -265,6 +273,9 @@ def log_usage_event(
     user_agent_family: str | None = None,
     created_at: str | None = None,
 ) -> bool:
+    if not usage_logging_enabled():
+        return False
+
     if event_type not in EVENT_TYPES:
         logger.warning("Skipped unknown usage event type: %s", event_type)
         return False
@@ -337,7 +348,21 @@ def log_usage_event(
         return False
 
 
+def empty_usage_summary() -> dict[str, Any]:
+    return {
+        "total_sessions": 0,
+        "total_chats": 0,
+        "recipe_selections": 0,
+        "uploads": 0,
+        "errors": 0,
+        "recent_activity": [],
+    }
+
+
 def usage_summary(*, limit: int = 25) -> dict[str, Any]:
+    if not usage_logging_enabled():
+        return empty_usage_summary()
+
     init_usage_db()
     safe_limit = max(1, min(limit, 100))
     if usage_storage_backend() == "postgres":

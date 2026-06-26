@@ -21,7 +21,7 @@ from typing import Any
 import anthropic
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -59,6 +59,7 @@ from usage_logging import (
     log_usage_event,
     normalise_session_id,
     rough_user_agent_family,
+    usage_logging_enabled,
     usage_summary,
 )
 
@@ -237,6 +238,9 @@ def log_request_usage(
     status_code: int | None = None,
     error_category: str | None = None,
 ) -> None:
+    if not usage_logging_enabled():
+        return
+
     log_usage_event(
         event_type=event_type,
         session_id=session_id,
@@ -414,6 +418,16 @@ def authenticated_dashboard_response(request: Request, supplied_token: str = "")
     return _admin_dashboard()
 
 
+@app.get("/app-config.js", include_in_schema=False)
+async def app_config_js() -> Response:
+    config = {"usageLoggingEnabled": usage_logging_enabled()}
+    return Response(
+        f"window.SHEF_CONFIG = {json.dumps(config)};\n",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.get("/", include_in_schema=False)
 @app.get("/index.html", include_in_schema=False)
 async def index(request: Request) -> FileResponse:
@@ -424,6 +438,11 @@ async def index(request: Request) -> FileResponse:
     raw_session_id = request.cookies.get(USAGE_SESSION_COOKIE)
     session_id = normalise_session_id(raw_session_id)
     response = FileResponse(index_path)
+    if not usage_logging_enabled():
+        if raw_session_id:
+            response.delete_cookie(USAGE_SESSION_COOKIE)
+        return response
+
     if raw_session_id != session_id:
         response.set_cookie(
             USAGE_SESSION_COOKIE,

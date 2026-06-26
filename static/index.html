@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="icon" href="./assets/icon-transparent.png" />
-    <link rel="stylesheet" href="./styles.css?v=privacy-confirmation" />
+    <link rel="stylesheet" href="./styles.css?v=usage-toggle" />
   </head>
   <body>
     <div class="app-shell">
@@ -129,27 +129,25 @@
       role="dialog"
       aria-modal="true"
       aria-labelledby="privacyTitle"
-      aria-describedby="privacyIntro privacyRetention"
+      aria-describedby="privacyIntro privacyRetention privacyUseTerms"
       hidden
     >
       <div class="privacy-dialog">
         <button class="privacy-close" id="privacyCloseButton" type="button" aria-label="Close privacy notice">&times;</button>
         <h2 id="privacyTitle">Privacy and Terms</h2>
         <p id="privacyIntro">
-          Shef logs anonymous usage events only to understand whether this project is being used.
-          Events may include sending a chat, selecting a recipe, uploading an image, recording audio,
-          or seeing an error.
+          Shef is not collecting usage analytics or anonymous usage events.
         </p>
-        <p id="privacyRetention">Shef does not store chat messages, uploaded images, audio recordings, generated recipes, personal identifiers, or exact IP addresses.</p>
-        <p>Use Shef for recipe and cooking help only. Do not submit personal, secret, unsafe, or non-recipe content.</p>
+        <p id="privacyRetention">Recipe chats are saved only in this browser for your local chat history. Shef does not store chat messages, uploaded images, audio recordings, generated recipes, personal identifiers, exact IP addresses, or usage sessions.</p>
+        <p id="privacyUseTerms">Requests are processed only to answer your recipe question. Use Shef for recipe and cooking help only, and do not submit personal, secret, unsafe, or non-recipe content.</p>
         <div class="privacy-consent" aria-label="Privacy confirmation">
           <label class="privacy-check">
             <input class="privacy-acceptance-checkbox" id="privacyAcceptanceUsage" type="checkbox" />
-            <span>I understand Shef records anonymous usage events.</span>
+            <span id="privacyAcceptanceUsageText">I understand Shef is not collecting usage analytics.</span>
           </label>
           <label class="privacy-check">
             <input class="privacy-acceptance-checkbox" id="privacyAcceptanceTerms" type="checkbox" />
-            <span>I accept Shef's privacy and recipe-use terms.</span>
+            <span id="privacyAcceptanceTermsText">I accept Shef's privacy and recipe-use terms.</span>
           </label>
           <button class="privacy-confirm-button" id="privacyAcceptButton" type="button" disabled>
             Accept and Continue
@@ -158,6 +156,7 @@
       </div>
     </div>
 
-    <script src="./app.js?v=privacy-confirmation"></script>
+    <script src="./app-config.js?v=usage-toggle"></script>
+    <script src="./app.js?v=usage-toggle"></script>
   </body>
 </html>

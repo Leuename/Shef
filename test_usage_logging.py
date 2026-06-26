@@ -18,6 +18,7 @@ class UsageLoggingTestCase(unittest.TestCase):
             os.environ,
             {
                 "SHEF_USAGE_DB_PATH": str(self.db_path),
+                "SHEF_USAGE_LOGGING_ENABLED": "true",
                 "SHEF_USAGE_DATABASE_URL": "",
                 "SUPABASE_DATABASE_URL": "",
             },
@@ -41,6 +42,33 @@ class UsageLoggingTestCase(unittest.TestCase):
 
 
 class TestUsageEventStorage(UsageLoggingTestCase):
+    def test_usage_logging_is_disabled_by_default(self) -> None:
+        import usage_logging
+
+        with patch.dict(
+            os.environ,
+            {
+                "SHEF_USAGE_DB_PATH": str(self.db_path),
+                "SHEF_USAGE_DATABASE_URL": "",
+                "SUPABASE_DATABASE_URL": "",
+            },
+            clear=True,
+        ):
+            self.assertFalse(usage_logging.usage_logging_enabled())
+            self.assertFalse(
+                usage_logging.log_usage_event(
+                    event_type="session_started",
+                    session_id="session-disabled",
+                )
+            )
+            self.assertFalse(self.db_path.exists())
+
+    def test_usage_logging_enabled_accepts_true_toggle(self) -> None:
+        import usage_logging
+
+        with patch.dict(os.environ, {"SHEF_USAGE_LOGGING_ENABLED": "True"}, clear=False):
+            self.assertTrue(usage_logging.usage_logging_enabled())
+
     def test_records_only_safe_event_metadata(self) -> None:
         import usage_logging
 
@@ -292,6 +320,33 @@ class TestAdminUsageDashboard(UsageLoggingTestCase):
             self.assertIn("Total sessions", dashboard.text)
             self.assertIn("Recent activity", dashboard.text)
 
+    def test_index_does_not_create_usage_cookie_when_logging_is_disabled(self) -> None:
+        import lc
+
+        client = TestClient(lc.app)
+
+        with patch.dict(os.environ, {"SHEF_USAGE_LOGGING_ENABLED": "false"}, clear=False):
+            response = client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("shef_usage_session", response.cookies)
+        self.assertFalse(self.db_path.exists())
+
+    def test_app_config_exposes_usage_logging_toggle(self) -> None:
+        import lc
+
+        client = TestClient(lc.app)
+
+        with patch.dict(os.environ, {"SHEF_USAGE_LOGGING_ENABLED": "false"}, clear=False):
+            disabled = client.get("/app-config.js")
+        with patch.dict(os.environ, {"SHEF_USAGE_LOGGING_ENABLED": "true"}, clear=False):
+            enabled = client.get("/app-config.js")
+
+        self.assertEqual(disabled.status_code, 200)
+        self.assertIn('"usageLoggingEnabled": false', disabled.text)
+        self.assertEqual(enabled.status_code, 200)
+        self.assertIn('"usageLoggingEnabled": true', enabled.text)
+
 
 class TestChatUsageEvents(UsageLoggingTestCase):
     def test_chat_request_logs_safe_events_without_message_text(self) -> None:
@@ -332,6 +387,35 @@ class TestChatUsageEvents(UsageLoggingTestCase):
         )
         self.assertNotIn("Secret Family Tinola", stored_values)
         self.assertNotIn("chicken, ginger, sayote", stored_values)
+
+    def test_chat_request_does_not_write_usage_events_when_logging_is_disabled(self) -> None:
+        import lc
+
+        client = TestClient(lc.app)
+        client.cookies.set("shef_usage_session", "session-disabled")
+
+        with (
+            patch.dict(os.environ, {"SHEF_USAGE_LOGGING_ENABLED": "false"}, clear=False),
+            patch.object(lc, "enforce_rate_limit", lambda request: None),
+            patch.object(lc, "recipe_search_sync", return_value="Filipino recipe context"),
+            patch.object(
+                lc,
+                "invoke_recipe_agent_sync",
+                return_value="Chicken Tinola\nIngredients: chicken, ginger, sayote",
+            ),
+        ):
+            response = client.post(
+                "/api/chat",
+                data={
+                    "message": "Show me the recipe for Tinola.",
+                    "thread_id": "local-chat",
+                    "history": "[]",
+                    "response_mode": "full_recipe",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(self.db_path.exists())
 
     def test_non_ingredient_upload_rejection_is_logged_without_file_content(self) -> None:
         import lc

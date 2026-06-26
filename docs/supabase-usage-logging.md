@@ -1,6 +1,6 @@
 # Supabase Usage Logging
 
-Shef can store anonymous usage events in Supabase Postgres. The app still falls back to local SQLite when no Postgres connection string is configured.
+Shef can store anonymous usage events in Supabase Postgres. Usage logging is off by default, including production, and must be explicitly enabled. When enabled, the app still falls back to local SQLite when no Postgres connection string is configured.
 
 ## Schema
 
@@ -29,9 +29,12 @@ It does not store chat messages, uploaded files, transcripts, generated recipes,
 Set these only in your local `.env` or deployment provider secrets:
 
 ```env
+SHEF_USAGE_LOGGING_ENABLED=true
 SHEF_USAGE_DATABASE_URL=postgresql://...
 ADMIN_DASHBOARD_TOKEN=...
 ```
+
+Set `SHEF_USAGE_LOGGING_ENABLED=false` or leave it unset to disable usage logging. In disabled mode, Shef does not create usage event records or a new anonymous usage session cookie, and the privacy notice tells users that usage analytics are not being collected.
 
 `SUPABASE_DATABASE_URL` also works, but `SHEF_USAGE_DATABASE_URL` is preferred because it makes the variable's purpose clear.
 
@@ -60,10 +63,11 @@ The dashboard queries the same backend selected by the environment:
 
 After deploying:
 
-1. Open the app once to create a `session_started` event.
-2. Submit one chat to create `chat_submitted` and either `chat_success` or `chat_error`.
-3. Open `/admin/usage` with the admin token and confirm the counts changed.
-4. In Supabase SQL Editor, run:
+1. Set `SHEF_USAGE_LOGGING_ENABLED=true`.
+2. Open the app once to create a `session_started` event.
+3. Submit one chat to create `chat_submitted` and either `chat_success` or `chat_error`.
+4. Open `/admin/usage` with the admin token and confirm the counts changed.
+5. In Supabase SQL Editor, run:
 
 ```sql
 select event_type, count(*)

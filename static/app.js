@@ -1,6 +1,7 @@
 const API_ENDPOINT = "/api/chat";
 const STORAGE_KEY = "shef.chats.v1";
 const PRIVACY_ACCEPTANCE_KEY = "shef.privacy.accepted.v1";
+const USAGE_LOGGING_ENABLED = window.SHEF_CONFIG?.usageLoggingEnabled === true;
 const MAX_CHATS = 10;
 const TARGET_AUDIO_SAMPLE_RATE = 16000;
 const RESPONSE_MODE_AUTO = "auto";
@@ -52,11 +53,16 @@ const toastContainer = document.querySelector("#toastContainer");
 const appShell = document.querySelector(".app-shell");
 const privacyButton = document.querySelector("#privacyButton");
 const privacyModal = document.querySelector("#privacyModal");
+const privacyIntro = document.querySelector("#privacyIntro");
+const privacyRetention = document.querySelector("#privacyRetention");
+const privacyUseTerms = document.querySelector("#privacyUseTerms");
 const privacyCloseButton = document.querySelector("#privacyCloseButton");
 const privacyAcceptanceCheckboxes = Array.from(
   document.querySelectorAll(".privacy-acceptance-checkbox")
 );
 const privacyAcceptButton = document.querySelector("#privacyAcceptButton");
+const privacyAcceptanceUsageText = document.querySelector("#privacyAcceptanceUsageText");
+const privacyAcceptanceTermsText = document.querySelector("#privacyAcceptanceTermsText");
 
 let state = loadState();
 let imageAttachment = null;
@@ -602,6 +608,41 @@ const closeSidebar = () => {
       sidebarBackdrop.hidden = true;
     }
   }, 180);
+};
+
+const PRIVACY_COPY = {
+  enabled: {
+    intro:
+      "Shef logs anonymous usage events only to understand whether this project is being used. Events may include sending a chat, selecting a recipe, uploading an image, recording audio, or seeing an error.",
+    retention:
+      "Shef does not store chat messages, uploaded images, audio recordings, generated recipes, personal identifiers, or exact IP addresses.",
+    terms:
+      "Use Shef for recipe and cooking help only. Do not submit personal, secret, unsafe, or non-recipe content.",
+    usageAcceptance: "I understand Shef records anonymous usage events.",
+    termsAcceptance: "I accept Shef's privacy and recipe-use terms.",
+  },
+  disabled: {
+    intro: "Shef is not collecting usage analytics or anonymous usage events.",
+    retention:
+      "Recipe chats are saved only in this browser for your local chat history. Shef does not store chat messages, uploaded images, audio recordings, generated recipes, personal identifiers, exact IP addresses, or usage sessions.",
+    terms:
+      "Requests are processed only to answer your recipe question. Use Shef for recipe and cooking help only, and do not submit personal, secret, unsafe, or non-recipe content.",
+    usageAcceptance: "I understand Shef is not collecting usage analytics.",
+    termsAcceptance: "I accept Shef's privacy and recipe-use terms.",
+  },
+};
+
+const applyPrivacyCopy = () => {
+  const copy = USAGE_LOGGING_ENABLED ? PRIVACY_COPY.enabled : PRIVACY_COPY.disabled;
+  if (privacyIntro) privacyIntro.textContent = copy.intro;
+  if (privacyRetention) privacyRetention.textContent = copy.retention;
+  if (privacyUseTerms) privacyUseTerms.textContent = copy.terms;
+  if (privacyAcceptanceUsageText) {
+    privacyAcceptanceUsageText.textContent = copy.usageAcceptance;
+  }
+  if (privacyAcceptanceTermsText) {
+    privacyAcceptanceTermsText.textContent = copy.termsAcceptance;
+  }
 };
 
 const hasAcceptedPrivacyTerms = () => {
@@ -1818,6 +1859,7 @@ newChatButton.addEventListener("click", () => {
 ensureActiveChat();
 saveState();
 renderApp();
+applyPrivacyCopy();
 if (!hasAcceptedPrivacyTerms()) {
   openPrivacyModal({ requireConfirmation: true });
 }
