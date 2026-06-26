@@ -82,8 +82,25 @@ class FrontendStaticTests(unittest.TestCase):
     def test_static_assets_are_cache_busted_for_ui_patch(self):
         html = read_static_file("index.html")
 
-        self.assertIn("./styles.css?v=choose-this-recipe-modal", html)
-        self.assertIn("./app.js?v=choose-this-recipe-modal", html)
+        self.assertIn("./styles.css?v=privacy-confirmation", html)
+        self.assertIn("./app.js?v=privacy-confirmation", html)
+
+    def test_first_visit_privacy_confirmation_requires_checkbox_acceptance(self):
+        html = read_static_file("index.html")
+        script = read_static_file("app.js")
+        css = read_static_file("styles.css")
+
+        self.assertIn('id="privacyAcceptanceUsage" type="checkbox"', html)
+        self.assertIn('id="privacyAcceptanceTerms" type="checkbox"', html)
+        self.assertIn('id="privacyAcceptButton" type="button" disabled', html)
+        self.assertIn('const PRIVACY_ACCEPTANCE_KEY = "shef.privacy.accepted.v1";', script)
+        self.assertIn("let privacyConfirmationRequired = false;", script)
+        self.assertIn("privacyAcceptanceCheckboxes.every((checkbox) => checkbox.checked)", script)
+        self.assertIn("localStorage.setItem(PRIVACY_ACCEPTANCE_KEY, nowIso());", script)
+        self.assertIn("openPrivacyModal({ requireConfirmation: true });", script)
+        self.assertIn("if (privacyConfirmationRequired) return;", script)
+        self.assertIn(".privacy-modal:not(.is-required) .privacy-consent", css)
+        self.assertIn(".privacy-close[hidden]", css)
 
 
 if __name__ == "__main__":

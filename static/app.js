@@ -1,5 +1,6 @@
 const API_ENDPOINT = "/api/chat";
 const STORAGE_KEY = "shef.chats.v1";
+const PRIVACY_ACCEPTANCE_KEY = "shef.privacy.accepted.v1";
 const MAX_CHATS = 10;
 const TARGET_AUDIO_SAMPLE_RATE = 16000;
 const RESPONSE_MODE_AUTO = "auto";
@@ -48,9 +49,14 @@ const sidebarBackdrop = document.querySelector("#sidebarBackdrop");
 const chatList = document.querySelector("#chatList");
 const sendButton = document.querySelector("#sendButton");
 const toastContainer = document.querySelector("#toastContainer");
+const appShell = document.querySelector(".app-shell");
 const privacyButton = document.querySelector("#privacyButton");
 const privacyModal = document.querySelector("#privacyModal");
 const privacyCloseButton = document.querySelector("#privacyCloseButton");
+const privacyAcceptanceCheckboxes = Array.from(
+  document.querySelectorAll(".privacy-acceptance-checkbox")
+);
+const privacyAcceptButton = document.querySelector("#privacyAcceptButton");
 
 let state = loadState();
 let imageAttachment = null;
@@ -61,6 +67,7 @@ let recordingInterval = null;
 let typingNode = null;
 let isSending = false;
 let recipeOptionPreview = null;
+let privacyConfirmationRequired = false;
 
 const createId = () =>
   window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
@@ -597,18 +604,71 @@ const closeSidebar = () => {
   }, 180);
 };
 
-const openPrivacyModal = () => {
-  if (!privacyModal) return;
-  privacyModal.hidden = false;
-  document.body.classList.add("modal-open");
-  privacyCloseButton?.focus();
+const hasAcceptedPrivacyTerms = () => {
+  try {
+    return Boolean(localStorage.getItem(PRIVACY_ACCEPTANCE_KEY));
+  } catch (error) {
+    console.warn("Unable to read privacy confirmation.", error);
+    return false;
+  }
 };
 
-const closePrivacyModal = () => {
+const savePrivacyAcceptance = () => {
+  try {
+    localStorage.setItem(PRIVACY_ACCEPTANCE_KEY, nowIso());
+  } catch (error) {
+    console.warn("Unable to save privacy confirmation.", error);
+  }
+};
+
+const updatePrivacyAcceptButton = () => {
+  if (!privacyAcceptButton) return;
+  privacyAcceptButton.disabled =
+    privacyAcceptanceCheckboxes.length === 0 ||
+    !privacyAcceptanceCheckboxes.every((checkbox) => checkbox.checked);
+};
+
+const setPrivacyModalRequired = (required) => {
+  privacyConfirmationRequired = required;
+  privacyModal?.classList.toggle("is-required", required);
+  if (privacyCloseButton) {
+    privacyCloseButton.hidden = required;
+    privacyCloseButton.disabled = required;
+  }
+};
+
+const openPrivacyModal = ({ requireConfirmation = false } = {}) => {
   if (!privacyModal) return;
+  setPrivacyModalRequired(requireConfirmation);
+  if (requireConfirmation) {
+    privacyAcceptanceCheckboxes.forEach((checkbox) => {
+      checkbox.checked = false;
+    });
+  }
+  updatePrivacyAcceptButton();
+  privacyModal.hidden = false;
+  appShell?.setAttribute("inert", "");
+  document.body.classList.add("modal-open");
+  (requireConfirmation ? privacyAcceptanceCheckboxes[0] : privacyCloseButton)?.focus();
+};
+
+const closePrivacyModal = ({ restoreFocus = true } = {}) => {
+  if (!privacyModal) return;
+  if (privacyConfirmationRequired) return;
   privacyModal.hidden = true;
+  appShell?.removeAttribute("inert");
   document.body.classList.remove("modal-open");
-  privacyButton?.focus();
+  if (restoreFocus) {
+    privacyButton?.focus();
+  }
+};
+
+const acceptPrivacyTerms = () => {
+  if (!privacyAcceptButton || privacyAcceptButton.disabled) return;
+  savePrivacyAcceptance();
+  setPrivacyModalRequired(false);
+  closePrivacyModal({ restoreFocus: false });
+  messageInput?.focus();
 };
 
 const createAvatar = (kind) => {
@@ -1701,6 +1761,10 @@ sidebarCloseButton.addEventListener("click", closeSidebar);
 sidebarBackdrop.addEventListener("click", closeSidebar);
 privacyButton?.addEventListener("click", openPrivacyModal);
 privacyCloseButton?.addEventListener("click", closePrivacyModal);
+privacyAcceptanceCheckboxes.forEach((checkbox) => {
+  checkbox.addEventListener("change", updatePrivacyAcceptButton);
+});
+privacyAcceptButton?.addEventListener("click", acceptPrivacyTerms);
 privacyModal?.addEventListener("click", (event) => {
   if (event.target === privacyModal) {
     closePrivacyModal();
@@ -1754,3 +1818,6 @@ newChatButton.addEventListener("click", () => {
 ensureActiveChat();
 saveState();
 renderApp();
+if (!hasAcceptedPrivacyTerms()) {
+  openPrivacyModal({ requireConfirmation: true });
+}

@@ -1298,6 +1298,8 @@ button:disabled,
 
 .privacy-dialog {
   position: relative;
+  display: grid;
+  gap: 12px;
   width: min(480px, 100%);
   padding: 24px;
   border: 1px solid var(--line);
@@ -1307,7 +1309,7 @@ button:disabled,
 }
 
 .privacy-dialog h2 {
-  margin: 0 42px 12px 0;
+  margin: 0 42px 0 0;
   font-size: 22px;
   line-height: 1.2;
 }
@@ -1319,8 +1321,56 @@ button:disabled,
   line-height: 1.6;
 }
 
-.privacy-dialog p + p {
-  margin-top: 12px;
+.privacy-consent {
+  display: grid;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.privacy-modal:not(.is-required) .privacy-consent {
+  display: none;
+}
+
+.privacy-check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid #dfe8d9;
+  border-radius: var(--radius-sm);
+  background: #f8fbf5;
+  color: #354035;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.privacy-check input {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--green);
+}
+
+.privacy-confirm-button {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  background: var(--green);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.privacy-confirm-button:hover,
+.privacy-confirm-button:focus-visible {
+  background: var(--green-dark);
+  outline: 2px solid #9ed994;
+  outline-offset: 2px;
+}
+
+.privacy-confirm-button:disabled {
+  background: #9ca79b;
 }
 
 .privacy-close {
@@ -1338,6 +1388,10 @@ button:disabled,
   font-size: 24px;
   line-height: 1;
   cursor: pointer;
+}
+
+.privacy-close[hidden] {
+  display: none;
 }
 
 .privacy-close:hover,

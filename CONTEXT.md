@@ -20,6 +20,10 @@ _Avoid_: Server chat, cloud chat
 A non-content record that a broad Shef interaction happened, associated only with an anonymous session.
 _Avoid_: Chat transcript, analytics profile
 
+**Privacy Confirmation**:
+A first-visit acknowledgement where a user accepts Shef's anonymous usage and non-storage terms before using Recipe Chat.
+_Avoid_: Privacy popup, legal wall
+
 **Attachment Extraction**:
 The process of turning an uploaded ingredient image or voice note into text context for Shef.
 _Avoid_: Upload parsing, file processing
