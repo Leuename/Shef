@@ -644,102 +644,45 @@ class TestRecipeProviderConfig(unittest.TestCase):
 
         lc.get_recipe_model.cache_clear()
 
-    def test_defaults_to_openmodel(self):
+    def test_provider_label_is_nvidia_nim(self):
         import lc
 
         with patch.dict("os.environ", {}, clear=True):
-            self.assertFalse(lc.use_nvidia_nim_api())
-            self.assertEqual(lc.recipe_provider_label(), "OpenModel")
+            self.assertEqual(lc.recipe_provider_label(), "NVIDIA NIM")
 
-    def test_default_recipe_model_uses_openmodel_key(self):
+    def test_recipe_model_requires_nvidia_key(self):
+        import lc
+
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(lc.HTTPException) as ctx:
+                lc.get_recipe_model()
+
+        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertIn("NVIDIA_API_KEY", ctx.exception.detail)
+
+    def test_legacy_provider_env_is_ignored(self):
         import lc
 
         with patch.dict(
             "os.environ",
             {
-                "OPEN_MODEL_KEY": "test-openmodel-key",
+                "LEGACY_AI_API_KEY": "test-key",
+                "LEGACY_AI_BASE_URL": "https://legacy-provider.invalid",
             },
             clear=True,
         ):
-            with patch.object(lc.anthropic, "Anthropic") as anthropic_client:
-                model = lc.get_recipe_model()
+            with self.assertRaises(lc.HTTPException) as ctx:
+                lc.get_recipe_model()
 
-        self.assertIsInstance(model, lc.OpenModelMessagesModel)
-        anthropic_client.assert_called_once()
-        _, kwargs = anthropic_client.call_args
-        self.assertEqual(kwargs["base_url"], lc.OPENMODEL_BASE_URL)
-        self.assertEqual(model.model, lc.OPENMODEL_MODEL)
+        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertIn("NVIDIA_API_KEY", ctx.exception.detail)
 
-    def test_false_switch_uses_openmodel(self):
+    def test_recipe_model_uses_nvidia_nim(self):
         import lc
 
         with patch.dict(
             "os.environ",
             {
-                "USE_NVIDIA_NIM_API": "false",
-                "OPEN_MODEL_KEY": "test-openmodel-key",
-            },
-            clear=True,
-        ):
-            with patch.object(lc.anthropic, "Anthropic") as anthropic_client:
-                model = lc.get_recipe_model()
-
-        self.assertIsInstance(model, lc.OpenModelMessagesModel)
-        anthropic_client.assert_called_once()
-        _, kwargs = anthropic_client.call_args
-        self.assertEqual(kwargs["base_url"], lc.OPENMODEL_BASE_URL)
-        self.assertEqual(model.model, lc.OPENMODEL_MODEL)
-
-    def test_openmodel_payload_uses_messages_protocol_shape(self):
-        import lc
-
-        with patch.object(lc.anthropic, "Anthropic"):
-            model = lc.OpenModelMessagesModel(
-                api_key="test-openmodel-key",
-                base_url=lc.OPENMODEL_BASE_URL,
-                model=lc.OPENMODEL_MODEL,
-                temperature=0.35,
-                max_tokens=1600,
-            )
-
-        payload = model._payload(
-            [
-                lc.SystemMessage(content="system"),
-                lc.HumanMessage(content="hello"),
-                lc.AIMessage(content="hi"),
-                lc.HumanMessage(content="cook sinigang"),
-            ]
-        )
-
-        self.assertEqual(payload["model"], lc.OPENMODEL_MODEL)
-        self.assertEqual(payload["system"], "system")
-        self.assertEqual(payload["max_tokens"], 1600)
-        self.assertEqual(
-            payload["messages"],
-            [
-                {"role": "user", "content": "hello"},
-                {"role": "assistant", "content": "hi"},
-                {"role": "user", "content": "cook sinigang"},
-            ],
-        )
-
-    def test_openmodel_content_parser_ignores_thinking_blocks(self):
-        import lc
-
-        content = [
-            type("ThinkingBlock", (), {"type": "thinking", "thinking": "internal"})(),
-            type("TextBlock", (), {"type": "text", "text": "ok"})(),
-        ]
-
-        self.assertEqual(lc.anthropic_message_content_to_text(content), "ok")
-
-    def test_true_switch_uses_nvidia_nim(self):
-        import lc
-
-        with patch.dict(
-            "os.environ",
-            {
-                "USE_NVIDIA_NIM_API": "true",
                 "NVIDIA_API_KEY": "test-nvidia-key",
             },
             clear=True,

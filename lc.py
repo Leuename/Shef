@@ -15,10 +15,8 @@ from collections import OrderedDict
 from collections.abc import Iterator
 from functools import lru_cache
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
-import anthropic
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
@@ -71,8 +69,6 @@ SHARED_ENV = Path(r"C:\Mine\code\langchain\.env")
 APP_ENV = APP_DIR / ".env"
 
 FINAL_MODEL = "deepseek-ai/deepseek-v4-pro"
-OPENMODEL_MODEL = "deepseek-v4-flash"
-OPENMODEL_BASE_URL = "https://api.openmodel.ai"
 VISION_MODEL = "meta/llama-3.2-11b-vision-instruct"
 PARAKEET_FUNCTION_ID = "d3fe9151-442b-4204-a70d-5fcc597fd610"
 RIVA_SERVER = "grpc.nvcf.nvidia.com:443"
@@ -606,21 +602,8 @@ def require_env(name: str, *, fallback: str | None = None) -> str:
     )
 
 
-def env_flag(name: str, *, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def use_nvidia_nim_api() -> bool:
-    return env_flag("USE_NVIDIA_NIM_API", default=False)
-
-
 def recipe_provider_label() -> str:
-    if use_nvidia_nim_api():
-        return "NVIDIA NIM"
-    return "OpenModel"
+    return "NVIDIA NIM"
 
 
 def validate_response_mode(response_mode: str) -> str:
@@ -691,87 +674,11 @@ def require_riva_client() -> Any:
     return riva.client
 
 
-def anthropic_message_content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content.strip()
-    parts: list[str] = []
-    for item in content or []:
-        text = getattr(item, "text", None)
-        if isinstance(text, str):
-            parts.append(text)
-        elif isinstance(item, dict) and isinstance(item.get("text"), str):
-            parts.append(item["text"])
-    return "".join(parts).strip()
-
-
-class OpenModelMessagesModel:
-    def __init__(
-        self,
-        *,
-        api_key: str,
-        base_url: str,
-        model: str,
-        temperature: float,
-        max_tokens: int,
-    ) -> None:
-        self.model = model
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.client = anthropic.Anthropic(base_url=base_url, api_key=api_key)
-
-    def _payload(
-        self,
-        messages: list[SystemMessage | HumanMessage | AIMessage],
-    ) -> dict[str, Any]:
-        system_parts: list[str] = []
-        api_messages: list[dict[str, str]] = []
-
-        for message in messages:
-            content = message_content_to_text(message.content)
-            if not content:
-                continue
-            if isinstance(message, SystemMessage):
-                system_parts.append(content)
-            elif isinstance(message, AIMessage):
-                api_messages.append({"role": "assistant", "content": content})
-            else:
-                api_messages.append({"role": "user", "content": content})
-
-        payload: dict[str, Any] = {
-            "model": self.model,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-            "messages": api_messages,
-        }
-        if system_parts:
-            payload["system"] = "\n\n".join(system_parts)
-        return payload
-
-    def invoke(self, messages: list[SystemMessage | HumanMessage | AIMessage]) -> Any:
-        response = self.client.messages.create(**self._payload(messages))
-        return SimpleNamespace(content=anthropic_message_content_to_text(response.content))
-
-    def stream(self, messages: list[SystemMessage | HumanMessage | AIMessage]) -> Iterator[Any]:
-        with self.client.messages.stream(**self._payload(messages)) as stream:
-            for text in stream.text_stream:
-                yield SimpleNamespace(content=text)
-
-
 # ── Model / service singletons ──────────────────────────────────────────────
 
 
 @lru_cache(maxsize=1)
-def get_recipe_model() -> ChatNVIDIA | OpenModelMessagesModel:
-    if not use_nvidia_nim_api():
-        api_key = require_env("OPEN_MODEL_KEY")
-        return OpenModelMessagesModel(
-            model=OPENMODEL_MODEL,
-            api_key=api_key,
-            base_url=os.getenv("OPENMODEL_BASE_URL", OPENMODEL_BASE_URL),
-            temperature=0.35,
-            max_tokens=1600,
-        )
-
+def get_recipe_model() -> ChatNVIDIA:
     api_key = require_env("NVIDIA_API_KEY")
     return ChatNVIDIA(
         model=FINAL_MODEL,
