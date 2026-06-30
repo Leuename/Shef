@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="icon" href="./assets/icon-transparent.png" />
-    <link rel="stylesheet" href="./styles.css?v=usage-toggle" />
+    <link rel="stylesheet" href="./styles.css?v=clear-history" />
   </head>
   <body>
     <div class="app-shell">
@@ -69,6 +69,21 @@
           </div>
           <div class="header-actions">
             <button class="privacy-button" id="privacyButton" type="button">Privacy</button>
+            <button
+              class="clear-history-button"
+              id="clearHistoryButton"
+              type="button"
+              aria-label="Clear chat history"
+              title="Clear chat history"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M3 6h18" />
+                <path d="M8 6V4h8v2" />
+                <path d="M6 6l1 15h10l1-15" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+              </svg>
+            </button>
           </div>
         </header>
 
@@ -156,7 +171,7 @@
       </div>
     </div>
 
-    <script src="./app-config.js?v=usage-toggle"></script>
-    <script src="./app.js?v=usage-toggle"></script>
+    <script src="./app-config.js?v=clear-history"></script>
+    <script src="./app.js?v=clear-history"></script>
   </body>
 </html>

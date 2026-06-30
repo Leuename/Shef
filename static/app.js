@@ -63,6 +63,7 @@ const privacyAcceptanceCheckboxes = Array.from(
 const privacyAcceptButton = document.querySelector("#privacyAcceptButton");
 const privacyAcceptanceUsageText = document.querySelector("#privacyAcceptanceUsageText");
 const privacyAcceptanceTermsText = document.querySelector("#privacyAcceptanceTermsText");
+const clearHistoryButton = document.querySelector("#clearHistoryButton");
 
 let state = loadState();
 let imageAttachment = null;
@@ -580,6 +581,9 @@ const setComposerBusy = (busy) => {
   addButton.disabled = busy;
   micButton.disabled = busy;
   sendButton.disabled = busy;
+  if (clearHistoryButton) {
+    clearHistoryButton.disabled = busy;
+  }
 };
 
 const scrollToBottom = () => {
@@ -711,6 +715,38 @@ const acceptPrivacyTerms = () => {
   closePrivacyModal({ restoreFocus: false });
   messageInput?.focus();
 };
+
+const hasChatHistoryToClear = () =>
+  state.chats.length > 1 ||
+  state.chats.some((chat) => chat.messages.some((message) => !message.isWelcome));
+
+function clearChatHistory() {
+  if (isSending) return;
+  if (recorder) {
+    showToast("Stop recording before clearing chat history.", "warning");
+    return;
+  }
+  if (!hasChatHistoryToClear()) {
+    showToast("There is no saved chat history to clear.", "info", 3500, "No Chat History");
+    return;
+  }
+  if (
+    !window.confirm(
+      "Clear all saved Recipe Chats from this browser? This will delete every chat bubble in your local history."
+    )
+  ) {
+    return;
+  }
+
+  clearComposer();
+  setError("");
+  state = { activeChatId: null, chats: [] };
+  localStorage.removeItem(STORAGE_KEY);
+  createChat();
+  renderApp();
+  showToast("Chat history cleared.", "info", 3500, "History Cleared");
+  messageInput?.focus();
+}
 
 const createAvatar = (kind) => {
   const avatar = document.createElement("div");
@@ -1801,6 +1837,7 @@ menuButton.addEventListener("click", openSidebar);
 sidebarCloseButton.addEventListener("click", closeSidebar);
 sidebarBackdrop.addEventListener("click", closeSidebar);
 privacyButton?.addEventListener("click", openPrivacyModal);
+clearHistoryButton?.addEventListener("click", clearChatHistory);
 privacyCloseButton?.addEventListener("click", closePrivacyModal);
 privacyAcceptanceCheckboxes.forEach((checkbox) => {
   checkbox.addEventListener("change", updatePrivacyAcceptButton);

@@ -314,6 +314,7 @@ button {
 
 .header-actions {
   display: flex;
+  align-items: center;
   gap: 10px;
 }
 
@@ -353,6 +354,35 @@ button {
 .header-actions .privacy-button:focus-visible {
   color: var(--green-dark);
   background: transparent;
+}
+
+.header-actions .clear-history-button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #ffd1ca;
+  border-radius: 50%;
+  color: var(--tomato);
+  background: var(--tomato-soft);
+}
+
+.header-actions .clear-history-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.header-actions .clear-history-button:hover,
+.header-actions .clear-history-button:focus-visible {
+  color: #b9362a;
+  background: #ffe3df;
+  outline: 2px solid #ffc1b8;
+  outline-offset: 2px;
 }
 
 .message-list {

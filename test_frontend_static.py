@@ -82,9 +82,9 @@ class FrontendStaticTests(unittest.TestCase):
     def test_static_assets_are_cache_busted_for_ui_patch(self):
         html = read_static_file("index.html")
 
-        self.assertIn("./styles.css?v=usage-toggle", html)
-        self.assertIn("./app-config.js?v=usage-toggle", html)
-        self.assertIn("./app.js?v=usage-toggle", html)
+        self.assertIn("./styles.css?v=clear-history", html)
+        self.assertIn("./app-config.js?v=clear-history", html)
+        self.assertIn("./app.js?v=clear-history", html)
 
     def test_first_visit_privacy_confirmation_requires_checkbox_acceptance(self):
         html = read_static_file("index.html")
@@ -106,6 +106,33 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("if (privacyConfirmationRequired) return;", script)
         self.assertIn(".privacy-modal:not(.is-required) .privacy-consent", css)
         self.assertIn(".privacy-close[hidden]", css)
+
+    def test_header_clear_history_button_resets_local_chat_history(self):
+        html = read_static_file("index.html")
+        script = read_static_file("app.js")
+        css = read_static_file("styles.css")
+
+        self.assertIn('class="clear-history-button"', html)
+        self.assertIn('id="clearHistoryButton"', html)
+        self.assertIn('aria-label="Clear chat history"', html)
+        self.assertIn('title="Clear chat history"', html)
+        self.assertIn(
+            'const clearHistoryButton = document.querySelector("#clearHistoryButton");',
+            script,
+        )
+        self.assertIn("function clearChatHistory()", script)
+        self.assertIn("window.confirm(", script)
+        self.assertIn("Clear all saved Recipe Chats from this browser?", script)
+        self.assertIn("localStorage.removeItem(STORAGE_KEY);", script)
+        self.assertIn("state = { activeChatId: null, chats: [] };", script)
+        self.assertIn("createChat();", script)
+        self.assertIn('showToast("Chat history cleared.", "info"', script)
+        self.assertIn(
+            'clearHistoryButton?.addEventListener("click", clearChatHistory);',
+            script,
+        )
+        self.assertIn(".header-actions .clear-history-button", css)
+        self.assertIn(".header-actions .clear-history-button svg", css)
 
 
 if __name__ == "__main__":
